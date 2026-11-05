@@ -8,6 +8,7 @@ import logging
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from websockets.asyncio.server import serve
+from websockets.exceptions import ConnectionClosed
 
 from .protocol import message, request_id
 
@@ -33,6 +34,12 @@ class ExecutionBroker:
         self.executors.clear()
 
     async def handle_executor(self, websocket):
+        try:
+            await self._handle_executor(websocket)
+        except ConnectionClosed as exc:
+            logger.info("Executor connection closed: %s", exc)
+
+    async def _handle_executor(self, websocket):
         executor_id = None
         while executor_id is None:
             registration = await websocket.recv()
@@ -59,17 +66,17 @@ class ExecutionBroker:
             executor_id = requested_id
 
         self.executors[executor_id] = {"websocket": websocket, **registration}
-        await websocket.send(
-            json.dumps(message("register_result", accepted=True, executor_id=executor_id))
-        )
-        logger.info(
-            "Executor connected: id=%s host=%s cwd=%s python=%s",
-            executor_id,
-            registration.get("host", "unknown"),
-            registration.get("cwd", "unknown"),
-            registration.get("python", "unknown"),
-        )
         try:
+            await websocket.send(
+                json.dumps(message("register_result", accepted=True, executor_id=executor_id))
+            )
+            logger.info(
+                "Executor connected: id=%s host=%s cwd=%s python=%s",
+                executor_id,
+                registration.get("host", "unknown"),
+                registration.get("cwd", "unknown"),
+                registration.get("python", "unknown"),
+            )
             async for raw_message in websocket:
                 event = json.loads(raw_message)
                 if event.get("type") == "heartbeat":

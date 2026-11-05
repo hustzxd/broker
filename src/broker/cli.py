@@ -8,10 +8,12 @@ from urllib.parse import urlsplit, urlunsplit
 from .broker import create_broker
 from .config import DEFAULT_CONFIG_PATH, ensure_config, int_value, load_config
 from .executor import BrokerConnectionError, run_executor
+from .version import __version__
 
 
 def _build_parser():
     parser = argparse.ArgumentParser(prog="broker")
+    parser.add_argument("--version", action="version", version=f"%(prog)s v{__version__}")
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--mcp-host")
     parser.add_argument("--mcp-port", type=int)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "execution-broker"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MCP execution broker and remote executors"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,9 @@ dependencies = [
 
 [project.scripts]
 broker = "broker.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "broker.version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

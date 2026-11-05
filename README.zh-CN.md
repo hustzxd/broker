@@ -33,6 +33,15 @@ python -m pip install -e .
 
 本项目独立运行，无需安装 LocalEnv。需要 Python 3.10 或更新版本，也可以使用 `python -m broker` 运行命令行工具。
 
+查看安装版本：
+
+```bash
+broker --version
+# broker v0.1.1
+```
+
+后续每次修改后，递增 `src/broker/version.py` 中的补丁版本号，例如从 `0.1.1` 升到 `0.1.2`。命令行和安装包元数据使用同一份版本定义。
+
 ## 配置
 
 默认配置文件路径：

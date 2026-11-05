@@ -41,6 +41,17 @@ dependencies.
 This project runs independently and does not require LocalEnv. Python 3.10 or
 newer is required. You can also run the CLI with `python -m broker`.
 
+Check the installed version:
+
+```bash
+broker --version
+# broker v0.1.1
+```
+
+For each subsequent change, increment the patch version in
+`src/broker/version.py` (for example, `0.1.1` to `0.1.2`). The CLI and package
+metadata use this same version source.
+
 ## Configuration
 
 The default configuration file is:
