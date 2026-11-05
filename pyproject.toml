@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "execution-broker"
+version = "0.1.0"
+description = "MCP execution broker and remote executors"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2,<3",
+    "PyYAML",
+    "websockets>=14",
+]
+
+[project.scripts]
+broker = "broker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
