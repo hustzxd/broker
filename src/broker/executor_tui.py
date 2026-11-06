@@ -7,6 +7,7 @@ import re
 import time
 
 from rich.text import Text
+from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Collapsible, Footer, Header, Static, TextArea, TabbedContent, TabPane
@@ -27,11 +28,30 @@ def plain(text):
     return "".join(char for char in text if char in "\n\t" or char.isprintable())
 
 
+def format_duration(seconds):
+    """Format elapsed time, carrying rounded seconds across unit boundaries."""
+    tenths = max(0, round(seconds * 10))
+    days, tenths = divmod(tenths, 864000)
+    hours, tenths = divmod(tenths, 36000)
+    minutes, tenths = divmod(tenths, 600)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or days:
+        parts.append(f"{hours}h")
+    if minutes or hours or days:
+        parts.append(f"{minutes}m")
+    parts.append(f"{tenths / 10:.1f}s")
+    return " ".join(parts)
+
+
 class RunCard(Collapsible):
     def __init__(self, run_id, kind, name, command):
         self.run_id = run_id
         self.kind = kind
         self.run_name = name
+        preview = " ".join(plain(command).split())
+        self.command_preview = preview if len(preview) <= 60 else preview[:59] + "…"
         self.status = "submitted" if kind == "task" else "starting"
         self.received_at = time.monotonic()
         self.started_at = None
@@ -55,13 +75,19 @@ class RunCard(Collapsible):
     def on_mount(self):
         self.refresh_content()
 
+    def on_collapsible_toggled(self, event):
+        if event.collapsible is self:
+            self.refresh_title()
+
     def refresh_title(self):
         duration = ""
         if self.started_at is not None:
-            duration = f" · {(self.finished_at or time.monotonic()) - self.started_at:.1f}s"
+            end = self.finished_at if self.finished_at is not None else time.monotonic()
+            duration = f" · {format_duration(end - self.started_at)}"
         # Escape Rich markup in names coming from remote commands.
         label = plain(self.run_name).replace("[", "\\[")[:100]
-        self.title = f"{self.kind} {label} · {self.status.upper()}{duration} · Enter/click to expand or collapse"
+        suffix = f"$ {escape(self.command_preview)}" if self.kind == "task" and self.collapsed else "Enter/click to expand or collapse"
+        self.title = f"{self.kind} {label} · {self.status.upper()}{duration} · {suffix}"
 
     def refresh_content(self):
         if not self.is_mounted:

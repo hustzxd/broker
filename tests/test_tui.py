@@ -13,7 +13,7 @@ from test_cancel_task import MemorySocket, python_command
 
 HAS_TEXTUAL = importlib.util.find_spec("textual") is not None
 if HAS_TEXTUAL:
-    from broker.executor_tui import ExecutorApp, RunCard, TabbedContent
+    from broker.executor_tui import ExecutorApp, RunCard, TabbedContent, format_duration
 
 
 async def idle_runner(*args, **kwargs):
@@ -32,10 +32,13 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause(0.3)
             card = app.cards["first"]
             self.assertTrue(card.collapsed)
+            self.assertIn("$ python train.py", card.title)
             self.assertIn("line 99", card.logs.text)
             await pilot.click("CollapsibleTitle")
             await pilot.pause(0.3)
             self.assertFalse(card.collapsed)
+            self.assertNotIn("$ python train.py", card.title)
+            self.assertEqual(card.query_one(".command").render().plain, "python train.py")
             await pilot.click(".collapse")
             await pilot.pause(0.3)
             self.assertTrue(card.collapsed)
@@ -199,6 +202,50 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(HAS_TEXTUAL, "Install execution-broker[tui] to test the interactive UI")
 class TuiCliTests(unittest.TestCase):
+    def test_collapsed_task_command_preview(self):
+        for command, preview in (
+            ("ls -la", "ls -la"),
+            ("echo first\n  &&\t echo second", "echo first && echo second"),
+            ("x" * 60, "x" * 60),
+            ("x" * 61, "x" * 59 + "…"),
+            ("测" * 61, "测" * 59 + "…"),
+        ):
+            with self.subTest(command=command):
+                card = RunCard("preview", "task", "preview", command)
+                self.assertIn("$ " + preview, card.title)
+                self.assertLessEqual(len(card.command_preview), 60)
+                card.collapsed = False
+                card.refresh_title()
+                self.assertNotIn("$ " + preview, card.title)
+        card = RunCard("markup", "task", "markup", "echo [red]literal[/red]")
+        self.assertIn(r"\[red]", card.title)
+        service = RunCard("service", "service", "vllm", "serve model")
+        self.assertNotIn("$ serve model", service.title)
+
+    def test_duration_units_and_rounding_boundaries(self):
+        for seconds, expected in (
+            (0, "0.0s"), (-1, "0.0s"), (59.94, "59.9s"),
+            (59.96, "1m 0.0s"), (60, "1m 0.0s"),
+            (1111.4, "18m 31.4s"), (3599.96, "1h 0m 0.0s"),
+            (3661.2, "1h 1m 1.2s"), (86399.96, "1d 0h 0m 0.0s"),
+            (90061.3, "1d 1h 1m 1.3s"),
+        ):
+            with self.subTest(seconds=seconds):
+                self.assertEqual(format_duration(seconds), expected)
+
+    def test_card_duration_refreshes_and_freezes_at_completion(self):
+        card = RunCard("duration-test", "service", "test", "serve")
+        card.started_at = 100
+        with patch("broker.executor_tui.time.monotonic", return_value=1211.4):
+            card.refresh_title()
+            self.assertIn("18m 31.4s", card.title)
+        with patch("broker.executor_tui.time.monotonic", return_value=3761.2):
+            card.refresh_title()
+            self.assertIn("1h 1m 1.2s", card.title)
+            card.finished_at = 160
+            card.refresh_title()
+            self.assertIn("1m 0.0s", card.title)
+
     def test_tui_requires_terminal_and_launches_app_with_existing_config(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
             path = Path(directory) / "config.yaml"

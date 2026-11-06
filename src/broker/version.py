@@ -1,6 +1,6 @@
 """Package version shared by the CLI and distribution metadata."""
 
-__version__ = "0.1.17"
+__version__ = "0.1.21"
 
 
 def warn_version_mismatch(logger, broker_version, executor_version):
