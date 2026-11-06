@@ -374,6 +374,8 @@ class AuthenticatedMCPServer(MCPServer):
 
     def streamable_http_app(self, **kwargs):
         app = super().streamable_http_app(**kwargs)
+        from .web import web_routes
+        app.router.routes.extend(web_routes(self.execution_broker))
         app.add_middleware(BearerKeyMiddleware, key=self._broker_key)
         return app
 
@@ -401,6 +403,7 @@ def create_broker(
             process_request=executor_auth(key),
         ):
             try:
+                logger.info("Web UI is available at /ui/ on the MCP HTTP listener; sign in with the Broker Key")
                 yield broker
             finally:
                 await broker.shutdown()

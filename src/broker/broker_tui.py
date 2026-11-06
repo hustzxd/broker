@@ -9,7 +9,7 @@ import time
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
-from textual.widgets import Button, Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import Button, Footer, Header, Static, TabbedContent, TabPane, Link
 
 from .executor_tui import ExecutorApp, RunCard, TERMINAL, UILogHandler, plain
 from .version import __version__
@@ -30,6 +30,7 @@ class BrokerApp(App):
     TITLE = "Broker"
     CSS = ExecutorApp.CSS + """
     #executors { height: 1fr; }
+    #web-link { height: 1; margin: 0 2 1 2; }
     .executor-info { height: auto; max-height: 5; padding: 0 2; color: $text-muted; }
     .executor-views { height: 1fr; }
     """
@@ -44,6 +45,10 @@ class BrokerApp(App):
         self.server = server
         self.broker = server.execution_broker
         self.host, self.port, self.key = host, port, key
+        web_host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+        if ":" in web_host and not web_host.startswith("["):
+            web_host = f"[{web_host}]"
+        self.web_url = f"http://{web_host}:{port}/ui/"
         self.runner = runner
         self.cards = {}
         self.executor_views = {}
@@ -59,6 +64,7 @@ class BrokerApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield self.status_line
+        yield Link(f"Web UI: {self.web_url}  ↗", url=self.web_url, id="web-link", tooltip="Open the Web UI in your local browser; sign in with the Broker Key")
         with TabbedContent(id="executors"):
             with TabPane("Overview", id="overview"):
                 yield Static("Waiting for executors…", classes="empty")
@@ -111,7 +117,8 @@ class BrokerApp(App):
         known.update(record["executor_id"] for record in self.broker.tasks.values())
         known.update(record["executor_id"] for record in self.broker.services.values())
         tabs = self.query_one("#executors", TabbedContent)
-        for executor_id in sorted(known):
+        ordered = sorted(known, key=lambda name: (name not in self.broker.executors, name))
+        for executor_id in ordered:
             if executor_id not in self.executor_views:
                 identifier = "executor-" + hashlib.sha256(executor_id.encode()).hexdigest()[:16]
                 self.executor_views[executor_id] = identifier
@@ -121,6 +128,8 @@ class BrokerApp(App):
                     tabs.active = identifier
             identifier = self.executor_views[executor_id]
             record = self.broker.executors.get(executor_id)
+            label = plain(executor_id).replace("[", "\\[")
+            tabs.get_tab(identifier).label = label if record is not None else f"{label} · OFFLINE"
             info = f"{executor_id} · {'ONLINE' if record else 'OFFLINE'}"
             if record:
                 info += f" · v{record.get('version', 'unknown')}\n{record.get('cwd', 'unknown')} · {record.get('python', 'unknown')}"
@@ -165,9 +174,22 @@ class BrokerApp(App):
         for executor_id in list(self.executor_views):
             if executor_id not in known:
                 await tabs.remove_pane(self.executor_views.pop(executor_id))
+        previous = tabs.get_tab("overview")
+        previous_pane = self.query_one("#overview", TabPane)
+        for executor_id in ordered:
+            identifier = self.executor_views[executor_id]
+            tab = tabs.get_tab(identifier)
+            pane = self.query_one(f"#{identifier}", TabPane)
+            siblings = list(tab.parent.children)
+            if siblings.index(tab) != siblings.index(previous) + 1:
+                tab.parent.move_child(tab, after=previous)
+            panes = list(pane.parent.children)
+            if panes.index(pane) != panes.index(previous_pane) + 1:
+                pane.parent.move_child(pane, after=previous_pane)
+            previous, previous_pane = tab, pane
         online = len(self.broker.executors)
         self.query_one("#overview", TabPane).query_one(Static).update(Text(
-            f"MCP: {self.host}:{self.port}/mcp\n{online} online executor(s) · "
+            f"MCP: {self.host}:{self.port}/mcp\nWeb UI: {self.web_url}\n{online} online executor(s) · "
             f"{len(self.broker.tasks)} task(s) · {len(self.broker.services)} service(s)"
         ))
         if (self.http_server is not None and self.http_server.started and not self._exit_requested

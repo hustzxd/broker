@@ -30,6 +30,13 @@ class BearerKeyMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
+            # Only the login page and its fixed assets are public; APIs and MCP
+            # still authenticate every request, including existing sessions.
+            if scope["method"] in {"GET", "HEAD"} and scope["path"] in {
+                "/ui", "/ui/", "/ui/app.js", "/ui/style.css",
+            }:
+                await self.app(scope, receive, send)
+                return
             headers = [value.decode("latin-1") for name, value in scope["headers"] if name.lower() == b"authorization"]
             if not authorized(headers, self.key):
                 response = JSONResponse(

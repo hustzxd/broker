@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.22
+# broker v0.1.27
 ```
 
 ## Start the broker
@@ -34,6 +34,14 @@ Defaults listen on `127.0.0.1`: MCP at `http://127.0.0.1:8273/mcp`, executor Web
 ```bash
 broker --mcp-host 0.0.0.0 --executor-host 0.0.0.0
 ```
+
+The Web UI starts with the broker on the same HTTP port: open
+`http://127.0.0.1:8273/ui/` (also shown as a clickable link in the broker TUI) and enter `broker.key`. It groups Tasks/Services by
+executor and supports live progress logs, collapse/expand, pause-follow and
+cancel/stop controls. The key is kept in the tab's session storage so refreshing
+reconnects automatically. Disconnecting or an authentication failure clears it;
+closing the tab ends the session. Both TUI and raw server modes include the Web UI; closing the broker stops
+it too. Remote access needs HTTPS or an encrypted tunnel, just like MCP.
 
 ## Start an executor
 
@@ -146,7 +154,7 @@ start_service(executor_id="demo", name="tensorboard",
 
 ## TUI and runtime behavior
 
-- Broker: one tab per executor, with separate Tasks/Services views. Executor: separate Tasks/Services tabs.
+- Broker TUI and Web UI list online executors first, followed by labeled OFFLINE entries; each group is sorted by name. Broker: one tab per executor, with separate Tasks/Services views. Executor: separate Tasks/Services tabs.
 - Cards start collapsed; task titles preview up to 60 command characters, with `…` for longer commands. Expand to see the full command. Click a title to expand; F2/F3 expand/collapse the current view. Pause follow to scroll/select logs; Ctrl+C copies, Ctrl+Q exits and closes connections or cleans up local processes.
 - TUI logs interpret carriage returns and common cursor/erase controls so tqdm progress bars update in place. Raw broker output stays unchanged; this is not a full terminal emulator.
 - Executors reconnect with backoff. Unfinished tasks become `lost` when the broker detects a disconnect and are never replayed. Services stop on disconnect; they do not survive reconnects.

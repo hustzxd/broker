@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.22
+# broker v0.1.27
 ```
 
 ## 启动中心 Broker
@@ -34,6 +34,8 @@ broker --output-mode raw   # 普通日志，适合后台运行
 ```bash
 broker --mcp-host 0.0.0.0 --executor-host 0.0.0.0
 ```
+
+Web UI 随 broker 一起启动，共用 HTTP 端口。中心 TUI 提供完整的可点击链接；打开 `http://127.0.0.1:8273/ui/`，输入 `broker.key` 即可按 executor 查看 Tasks/Services、实时进度日志，展开/折叠、暂停跟随，并取消任务或停止服务。Key 保存在当前标签页的会话存储中，刷新后自动连接；点击“断开连接”或认证失效时清除，关闭标签页结束会话。TUI 和 raw 模式均提供 Web UI，broker 退出时一起关闭；远程访问同样需要 HTTPS 或加密隧道。
 
 ## 启动 Executor
 
@@ -146,7 +148,7 @@ start_service(executor_id="demo", name="tensorboard",
 
 ## 界面与运行行为
 
-- Broker 按 executor 分页，内部再分 Tasks/Services；executor 也分别展示 Tasks/Services。
+- 中心 TUI 和 Web UI 均将在线 executor 排在前面，离线项标注 OFFLINE 并排在后面，组内按名称排序。Broker 按 executor 分页，内部再分 Tasks/Services；executor 也分别展示 Tasks/Services。
 - 卡片默认折叠，任务标题预览最多 60 个命令字符，超长以 `…` 截断，展开可查看完整命令。点击标题展开，F2/F3 展开/折叠当前视图。暂停跟随后可滚动和选择日志，Ctrl+C 复制；Ctrl+Q 退出并关闭连接或清理本地进程。
 - TUI 日志识别回车及常见光标移动/清行指令，tqdm 进度条可原位刷新；broker 原始输出不变，不提供完整终端模拟。
 - Executor 断线后按退避重连。Broker 检测到断线后，未完成任务变为 `lost`，不会自动重放；服务在断线后停止，不跨连接恢复。
