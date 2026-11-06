@@ -15,6 +15,7 @@ from websockets.exceptions import ConnectionClosed
 
 from . import executor
 from .logs import DEFAULT_MAX_LOG_BYTES, LogBuffer
+from .terminal_output import render_output
 from .version import __version__
 
 
@@ -60,6 +61,9 @@ class RunCard(Collapsible):
         self.buffer = LogBuffer(DEFAULT_MAX_LOG_BYTES)
         self.dirty = True
         self.follow = True
+        self._terminal_state = {}
+        self._output_cursor = 0
+        self._output_truncated = False
         self.logs = TextArea(read_only=True, show_line_numbers=False, show_cursor=True, classes="output")
         super().__init__(
             Static(Text(plain(command)), classes="command"),
@@ -101,9 +105,13 @@ class RunCard(Collapsible):
         # Don't replace the text being selected while follow is paused.
         if not self.follow:
             return
-        result = self.buffer.read()
-        text = ("[Older local output truncated]\n" if result["truncated"] else "")
-        text += plain("".join(item["data"] for item in result["entries"]))
+        result = self.buffer.read(cursor=self._output_cursor)
+        if result["truncated"]:
+            self._terminal_state.clear()
+            self._output_truncated = True
+        self._output_cursor = result["next_cursor"]
+        text = ("[Older local output truncated]\n" if self._output_truncated else "")
+        text += render_output("".join(item["data"] for item in result["entries"]), self._terminal_state)
         self.logs.load_text(text)
         if self.follow:
             self.logs.scroll_end(animate=False)

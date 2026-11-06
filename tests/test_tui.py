@@ -22,6 +22,22 @@ async def idle_runner(*args, **kwargs):
 
 @unittest.skipUnless(HAS_TEXTUAL, "Install execution-broker[tui] to test the interactive UI")
 class TuiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_progress_refreshes_in_place_and_raw_output_is_retained(self):
+        app = ExecutorApp("ws://test", "demo", "secret", runner=idle_runner)
+        async with app.run_test(size=(100, 35)) as pilot:
+            app.event({"type": "execute", "task_id": "progress", "command": "simulate"})
+            first = "\rSimulating: 35%\n\rSecond: 38%\x1b[A"
+            app.event({"type": "output", "task_id": "progress", "stream": "stderr", "data": first})
+            await pilot.pause(0.3)
+            card = app.cards["progress"]
+            self.assertEqual(card.logs.text, "Simulating: 35%\nSecond: 38%")
+            update = "\rSimulating: 46%\x1b[K\n\rSecond: 47%\x1b[K\x1b[A"
+            app.event({"type": "output", "task_id": "progress", "stream": "stderr", "data": update})
+            await pilot.pause(0.3)
+            self.assertEqual(card.logs.text, "Simulating: 46%\nSecond: 47%")
+            self.assertEqual("".join(entry["data"] for entry in card.buffer.read()["entries"]), first + update)
+            await app.action_quit()
+
     async def test_click_collapse_keyboard_expand_scroll_and_text_selection(self):
         app = ExecutorApp("ws://test", "demo", "secret", runner=idle_runner)
         async with app.run_test(size=(110, 38)) as pilot:
@@ -75,7 +91,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             app.event({"type": "service_output", "service_id": "svc", "stream": "stderr", "data": "\x1b[31mhello\x1b[0m\rworld\n"})
             await pilot.pause(0.3)
             card = app.cards["svc"]
-            self.assertEqual(card.logs.text, "hello\nworld\n")
+            self.assertEqual(card.logs.text, "world\n")
             self.assertNotIn("\x07", card.title)
             card.buffer.max_bytes = 8
             app.event({"type": "service_output", "service_id": "svc", "stream": "stdout", "data": "x" * 1000})

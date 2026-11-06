@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.21
+# broker v0.1.22
 ```
 
 ## Start the broker
@@ -148,6 +148,7 @@ start_service(executor_id="demo", name="tensorboard",
 
 - Broker: one tab per executor, with separate Tasks/Services views. Executor: separate Tasks/Services tabs.
 - Cards start collapsed; task titles preview up to 60 command characters, with `…` for longer commands. Expand to see the full command. Click a title to expand; F2/F3 expand/collapse the current view. Pause follow to scroll/select logs; Ctrl+C copies, Ctrl+Q exits and closes connections or cleans up local processes.
+- TUI logs interpret carriage returns and common cursor/erase controls so tqdm progress bars update in place. Raw broker output stays unchanged; this is not a full terminal emulator.
 - Executors reconnect with backoff. Unfinished tasks become `lost` when the broker detects a disconnect and are never replayed. Services stop on disconnect; they do not survive reconnects.
 - History is memory-only. Broker defaults: 1 MiB output per task/service, 100 completed tasks, 100 finished services, 32 unfinished commands per executor. Old history is evicted; excess commands return `queue_full`.
 

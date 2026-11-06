@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.21
+# broker v0.1.22
 ```
 
 ## 启动中心 Broker
@@ -148,6 +148,7 @@ start_service(executor_id="demo", name="tensorboard",
 
 - Broker 按 executor 分页，内部再分 Tasks/Services；executor 也分别展示 Tasks/Services。
 - 卡片默认折叠，任务标题预览最多 60 个命令字符，超长以 `…` 截断，展开可查看完整命令。点击标题展开，F2/F3 展开/折叠当前视图。暂停跟随后可滚动和选择日志，Ctrl+C 复制；Ctrl+Q 退出并关闭连接或清理本地进程。
+- TUI 日志识别回车及常见光标移动/清行指令，tqdm 进度条可原位刷新；broker 原始输出不变，不提供完整终端模拟。
 - Executor 断线后按退避重连。Broker 检测到断线后，未完成任务变为 `lost`，不会自动重放；服务在断线后停止，不跨连接恢复。
 - 历史仅存内存。Broker 默认每个任务/服务保留 1 MiB 输出、100 个已完成任务、100 个终态服务，每个 executor 最多 32 个未完成命令。旧历史会淘汰，超额提交返回 `queue_full`。
 
