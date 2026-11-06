@@ -35,6 +35,7 @@ _COLOR = os.environ.get("NO_COLOR") is None and (
 _partial_output_stream = None
 _partial_output_source = None
 _OUTPUT_MODE = ContextVar("executor_output_mode", default="raw")
+_UI = ContextVar("executor_ui", default=None)
 
 
 def _color(text, *codes):
@@ -45,6 +46,8 @@ def _color(text, *codes):
 
 
 def _emit(line=""):
+    if _UI.get() is not None:
+        return
     global _partial_output_stream, _partial_output_source
     if _partial_output_stream is not None:
         _partial_output_stream.write("\n")
@@ -71,6 +74,8 @@ class _OutputWriter:
         self.after_cr = False
 
     def write(self, text):
+        if _UI.get() is not None:
+            return
         global _partial_output_source
         stream = sys.stdout if self.stream_name == "stdout" else sys.stderr
         if _OUTPUT_MODE.get() == "raw":
@@ -414,6 +419,52 @@ class BrokerConnectionError(ConnectionError):
     """The executor could not establish a connection to its broker."""
 
 
+class _ObservedSocket:
+    """Mirror protocol events to the local UI without changing wire messages."""
+
+    def __init__(self, websocket, ui):
+        self.websocket = websocket
+        self.ui = ui
+
+    async def __aenter__(self):
+        await self.websocket.__aenter__()
+        return self
+
+    async def __aexit__(self, *args):
+        return await self.websocket.__aexit__(*args)
+
+    async def recv(self):
+        return await self.websocket.recv()
+
+    async def send(self, data):
+        self.ui.event(json.loads(data))
+        await self.websocket.send(data)
+
+    def __aiter__(self):
+        return self._events()
+
+    async def _events(self):
+        async for data in self.websocket:
+            self.ui.event(json.loads(data))
+            yield data
+
+
+async def _handle_control(websocket, event, tasks, services, monitor_tasks):
+    if event["type"] == "cancel_task":
+        task = tasks.get(event["task_id"])
+        if task is not None and not task["cancel_requested"]:
+            _cancel_task(task)
+            if not task["started"]:
+                _emit(_rule(f"task {event['task_id'][:8]} CANCELLED · before launch", "33"))
+                await websocket.send(json.dumps(message(
+                    "result", task_id=event["task_id"], returncode=None, status="cancelled",
+                )))
+    elif event["type"] == "stop_service":
+        stop_task = asyncio.create_task(_stop_service(websocket, event, services))
+        monitor_tasks.add(stop_task)
+        stop_task.add_done_callback(monitor_tasks.discard)
+
+
 async def _run_executor_connection(websocket, broker_url, state, metadata, interactive):
     """Register and serve one connection, cleaning up before any reconnect."""
     executor_id = state["executor_id"]
@@ -422,6 +473,9 @@ async def _run_executor_connection(websocket, broker_url, state, metadata, inter
     tasks = {}
     execution_tasks = set()
     execution_lock = asyncio.Lock()
+    ui = _UI.get()
+    if ui is not None:
+        websocket = _ObservedSocket(websocket, ui)
     async with websocket:
         while True:
             logger.info("Connecting to broker: url=%s executor_id=%s", broker_url, executor_id)
@@ -446,6 +500,8 @@ async def _run_executor_connection(websocket, broker_url, state, metadata, inter
                 state["executor_id"] = executor_id
                 state["registered"] = True
                 state["registered_at"] = asyncio.get_running_loop().time()
+                if ui is not None:
+                    ui.connected(executor_id, registration_result.get("version"))
                 break
             if state["registered"]:
                 raise _RegistrationRetry(registration_result.get("reason", "Registration rejected"))
@@ -458,6 +514,15 @@ async def _run_executor_connection(websocket, broker_url, state, metadata, inter
 
         logger.debug("Executor registered: id=%s cwd=%s python=%s", executor_id, os.getcwd(), os.sys.executable)
         _print_executor_banner(executor_id, broker_url)
+        if ui is not None:
+            async def control(event):
+                token = _UI.set(ui)
+                try:
+                    ui.event(event)
+                    await _handle_control(websocket, event, tasks, services, monitor_tasks)
+                finally:
+                    _UI.reset(token)
+            ui.control = control
         try:
             async for raw_message in websocket:
                 event = json.loads(raw_message)
@@ -472,22 +537,14 @@ async def _run_executor_connection(websocket, broker_url, state, metadata, inter
                     execution_tasks.add(execution_task)
                     execution_task.add_done_callback(execution_tasks.discard)
                 elif event.get("type") == "cancel_task":
-                    task = tasks.get(event["task_id"])
-                    if task is not None:
-                        _cancel_task(task)
-                        if not task["started"]:
-                            _emit(_rule(f"task {event['task_id'][:8]} CANCELLED · before launch", "33"))
-                            await websocket.send(json.dumps(message(
-                                "result", task_id=event["task_id"],
-                                returncode=None, status="cancelled",
-                            )))
+                    await _handle_control(websocket, event, tasks, services, monitor_tasks)
                 elif event.get("type") == "start_service":
                     await _start_service(websocket, event, services, monitor_tasks)
                 elif event.get("type") == "stop_service":
-                    stop_task = asyncio.create_task(_stop_service(websocket, event, services))
-                    monitor_tasks.add(stop_task)
-                    stop_task.add_done_callback(monitor_tasks.discard)
+                    await _handle_control(websocket, event, tasks, services, monitor_tasks)
         finally:
+            if ui is not None:
+                ui.disconnected()
             for task in tasks.values():
                 _cancel_task(task, reason="connection closed or executor shutting down")
             if execution_tasks:

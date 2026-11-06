@@ -37,10 +37,10 @@ python -m pip install -e .
 
 ```bash
 broker --version
-# broker v0.1.10
+# broker v0.1.17
 ```
 
-后续每次修改后，递增 `src/broker/version.py` 中的补丁版本号，例如从 `0.1.10` 升到 `0.1.11`。命令行和安装包元数据使用同一份版本定义。
+后续每次修改后，递增 `src/broker/version.py` 中的补丁版本号，例如从 `0.1.17` 升到 `0.1.18`。命令行和安装包元数据使用同一份版本定义。
 
 ## 配置
 
@@ -111,8 +111,13 @@ broker --config /path/to/config.yaml
 在中心服务器上执行：
 
 ```bash
-broker
+broker                         # 默认交互式总览
+broker --output-mode raw       # 后台运行时使用普通日志
 ```
+
+中心界面将每个 executor 放入独立页签，显示在线/离线状态、工作目录和版本；每个 executor 内再分别展示 Tasks 和 Services。卡片默认折叠，支持滚动、选择日志、暂停跟随，以及取消任务/停止服务。F2/F3 仅影响当前 executor 的当前分类。界面直接读取 broker 已有内存和限量日志，不额外建立 MCP 连接，也不复制输出缓冲。离线 executor 在仍有保留的任务/服务记录时继续展示，同名重连复用原视图。Ctrl+Q 关闭 HTTP 服务及 executor 连接；executor 按原有断线逻辑清理并尝试重连。
+
+新配置及未设置 `broker.output_mode` 的旧配置默认使用 `tui`，显式 `broker.output_mode: raw` 保持不变。交互界面需要终端；重定向、systemd 等后台运行方式请使用 `--output-mode raw`。
 
 也可以通过命令行覆盖配置：
 
@@ -244,13 +249,36 @@ broker 检测到 executor 断线后，会将其未完成任务标记为终态 `l
 
 ## 在 Codex 中使用
 
+### 交互式 executor 终端
+
+普通安装已包含 Textual，在 executor 使用的 Python 环境中更新即可：
+
+```bash
+python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
+# 本地仓库：
+python -m pip install -e .
+```
+
+在交互终端中启动：
+
+```bash
+broker executor --executor-id demo
+```
+
+新配置及未设置 `output_mode` 的旧配置默认使用 TUI；已有显式 `raw`/`prefixed` 配置保持不变，可用 `--output-mode tui` 或修改 `executor.output_mode` 切换。Tasks 和 Services 分页显示，分别保留滚动位置和卡片状态；后台输出继续更新，不自动切换当前页签。新建任务和服务卡片默认折叠，状态和日志仍持续更新。每个任务和服务显示独立卡片，包含命令、实时状态、耗时、错误和输出。点击标题或用 Tab 聚焦标题后按 Enter 可展开/折叠，`Show less` 按钮可折叠卡片。鼠标滚轮、Page Up/Page Down 用于滚动日志和外层历史；Tab/Shift+Tab 在控件和只读日志编辑区之间移动。查看或选择日志前点击 `Pause follow`，避免新输出重置选区；`Resume follow` 恢复最新输出。支持鼠标或 Shift+方向键选择、Ctrl+C 复制（系统剪贴板支持取决于终端）。F2 展开当前页签的全部卡片，F3 折叠当前页签的全部卡片。Ctrl+Q 会等待任务和服务清理后退出界面。
+
+`Cancel task`、`Stop service` 复用已有控制流程并同步 broker 状态。界面最多保留 100 个终态卡片及活跃卡片，每张卡片保留 1 MiB 本地日志，超出显示截断标记；不写入文件。交互显示会移除 ANSI/控制序列，发送给 broker 的原始输出不变。界面沿用现有自动重连逻辑；首次名称冲突会显示错误，请更换 ID 后重启。点击功能需要终端支持鼠标，重定向输出时请显式使用 `--output-mode raw` 或 `--output-mode prefixed`。
+
+### 普通终端输出
+
 多个任务和服务混合输出时，可选择带来源标签的本地显示模式：
 
 ```bash
+broker executor --executor-id demo --output-mode raw
 broker executor --executor-id demo --output-mode prefixed
 ```
 
-`--output-mode` 优先于 YAML 中的 `executor.output_mode`，默认 `raw`。`raw` 保留原始输出和回车进度更新；`prefixed` 显示 `[task <短ID> stdout]` 或 `[svc <名称> stderr]` 标签。半行输出立即显示，同一行跨读取块时不重复加前缀；其他来源或状态信息打断半行后，续写时重新加标签。带标签模式将 `\r` 进度更新显示为独立行。两种模式发送给 broker 的内容均保持原样，不含本地标签或补加的换行。
+`--output-mode` 优先于 YAML 中的 `executor.output_mode`，默认 `tui`。`raw` 保留原始输出和回车进度更新；`prefixed` 显示 `[task <短ID> stdout]` 或 `[svc <名称> stderr]` 标签。半行输出立即显示，同一行跨读取块时不重复加前缀；其他来源或状态信息打断半行后，续写时重新加标签。带标签模式将 `\r` 进度更新显示为独立行。两种模式发送给 broker 的内容均保持原样，不含本地标签或补加的换行。
 
 收到命令时显示 `QUEUED`，开始执行时显示 `RUNNING` 和从 executor 收到任务起的等待时长。没有排队等待的任务也会先显示接收提示，随后立即开始；启动前取消的任务不会显示 `RUNNING`。
 

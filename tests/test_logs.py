@@ -141,9 +141,9 @@ class LogConfigTests(unittest.TestCase):
             config = Path(directory) / "config.yaml"
             config.write_text("broker:\n  max_log_bytes: 2048\n")
             with patch("broker.cli.create_broker", return_value=Mock()) as create:
-                main(["--config", str(config)])
+                main(["--config", str(config), "--output-mode", "raw"])
                 self.assertEqual(create.call_args.kwargs["max_log_bytes"], 2048)
-                main(["--config", str(config), "--max-log-bytes", "512"])
+                main(["--config", str(config), "--output-mode", "raw", "--max-log-bytes", "512"])
                 self.assertEqual(create.call_args.kwargs["max_log_bytes"], 512)
                 with self.assertRaisesRegex(SystemExit, "positive integer"):
                     main(["--config", str(config), "--max-log-bytes", "0"])

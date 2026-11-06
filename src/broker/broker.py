@@ -407,6 +407,7 @@ def create_broker(
 
     # Keep access logs quiet; authentication never logs request credentials.
     mcp = AuthenticatedMCPServer("execution-broker", key=key, version=__version__, lifespan=lifespan, log_level="WARNING")
+    mcp.execution_broker = broker
 
     @mcp.tool()
     def list_executors() -> list[dict]:

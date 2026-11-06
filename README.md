@@ -45,11 +45,11 @@ Check the installed version:
 
 ```bash
 broker --version
-# broker v0.1.10
+# broker v0.1.17
 ```
 
 For each subsequent change, increment the patch version in
-`src/broker/version.py` (for example, `0.1.10` to `0.1.11`). The CLI and package
+`src/broker/version.py` (for example, `0.1.17` to `0.1.18`). The CLI and package
 metadata use this same version source.
 
 ## Configuration
@@ -142,8 +142,25 @@ integers. History is not written to files and is lost when the broker restarts.
 On the broker server:
 
 ```bash
-broker
+broker                         # default interactive dashboard
+broker --output-mode raw       # plain logs for background operation
 ```
+
+The dashboard shows each executor in a separate tab, including online/offline
+state, working directory and version. Each executor has independent Tasks and
+Services views, collapsed cards, log scrolling/selection and pause-follow controls.
+Cancel/stop buttons use the broker's existing task and service control methods.
+F2/F3 affect only the currently selected executor and category. Views read the
+existing broker memory and bounded logs without making an extra MCP connection
+or duplicating output buffers. Offline executors remain visible while retained
+task/service records exist; reconnecting under the same name reuses the view.
+Ctrl+Q stops the HTTP server and closes executor connections. Executors detect
+this as a disconnect and use their existing cleanup/reconnect behavior.
+
+New configs and configs missing `broker.output_mode` use `tui`; an explicit
+`broker.output_mode: raw` is preserved. The dashboard requires an interactive
+terminal. Select `--output-mode raw` for redirection, systemd or other background
+process managers.
 
 To override the configuration from the command line:
 
@@ -324,13 +341,56 @@ only in broker memory; restarting the broker loses that history.
 
 ## Use Broker In Codex
 
+### Interactive executor terminal
+
+Textual is included in the standard installation. Update the executor's Python environment:
+
+```bash
+python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
+# Local checkout:
+python -m pip install -e .
+```
+
+Start it in an interactive terminal:
+
+```bash
+broker executor --executor-id demo
+```
+
+TUI is the default for new configs and existing configs without `output_mode`.
+Existing explicit `raw`/`prefixed` settings are preserved; use
+`--output-mode tui` or change `executor.output_mode` to select TUI. Tasks and Services have
+separate tabs with independent scroll positions and card state. Background output
+continues updating without switching the active tab. New task and service cards
+start collapsed; their status and logs continue updating. Task and service cards
+show commands, live status, duration, errors and output. Click a title or focus
+it with Tab and press Enter to expand/collapse; `Show less` folds a card. Mouse
+wheel/Page Up/Page Down scroll logs and the surrounding history. Tab/Shift+Tab
+move between controls and read-only log editors. Pause follow before inspecting
+or selecting output so new logs don't reset your selection; Resume follow shows
+the latest output. Select text by mouse or Shift+arrow and copy with Ctrl+C
+(clipboard support depends on the terminal). F2 expands all cards in the current tab; F3 collapses
+all cards in that tab. Ctrl+Q quits and cleans up tasks and services before closing the interface.
+
+`Cancel task` and `Stop service` use the existing control paths and update the
+broker's state. The interface keeps at most 100 completed cards plus active
+cards, with 1 MiB of local output per card and a truncation marker. Logs remain
+in memory only. ANSI/control sequences are stripped for the interactive display;
+original output sent to the broker is unchanged. The UI reconnects with the same
+executor logic; initial name conflicts are shown as errors (choose another ID
+and restart). It requires an interactive terminal with mouse support for clicks;
+use `--output-mode raw` or `--output-mode prefixed` when redirecting output.
+
+### Plain terminal output
+
 For concurrent task and service logs, select a local output mode:
 
 ```bash
+broker executor --executor-id demo --output-mode raw
 broker executor --executor-id demo --output-mode prefixed
 ```
 
-`--output-mode` overrides `executor.output_mode` in YAML (`raw` by default).
+`--output-mode` overrides `executor.output_mode` in YAML (`tui` by default).
 `raw` preserves original output, including carriage-return progress updates.
 `prefixed` displays `[task <short-id> stdout]` or `[svc <name> stderr]` labels.
 Partial lines stream immediately; prefixes aren't repeated across read chunks

@@ -25,6 +25,7 @@ def _build_parser():
     parser.add_argument("--executor-host")
     parser.add_argument("--executor-port", type=int)
     parser.add_argument("--max-log-bytes", type=int, help="retained UTF-8 log bytes per task or service")
+    parser.add_argument("--output-mode", choices=("raw", "tui"), help="broker terminal format (default: tui)")
     subparsers = parser.add_subparsers(dest="command")
     parser.set_defaults(command="broker")
 
@@ -38,7 +39,7 @@ def _build_parser():
         help="override the port in the broker WebSocket URL",
     )
     executor.add_argument("--executor-id")
-    executor.add_argument("--output-mode", choices=("raw", "prefixed"), help="local terminal output format")
+    executor.add_argument("--output-mode", choices=("raw", "prefixed", "tui"), help="local terminal output format (default: tui)")
     doctor = subparsers.add_parser("doctor", help="check MCP connectivity, key and tool discovery")
     doctor.add_argument("--url", help="MCP URL; defaults to the configured broker listener")
     return parser
@@ -78,6 +79,9 @@ def main(argv=None):
     config = load_config(args.config)
     if args.command == "broker":
         broker_config = config.get("broker", {})
+        output_mode = args.output_mode or broker_config.get("output_mode", "tui")
+        if output_mode not in {"raw", "tui"}:
+            raise SystemExit("broker.output_mode must be raw or tui")
         try:
             key = validate_key(os.environ["BROKER_KEY"]) if "BROKER_KEY" in os.environ else ensure_broker_key(args.config)
         except ValueError as exc:
@@ -91,7 +95,7 @@ def main(argv=None):
             max_log_bytes = broker_config.get("max_log_bytes", DEFAULT_MAX_LOG_BYTES)
         if isinstance(max_log_bytes, bool) or not isinstance(max_log_bytes, int) or max_log_bytes <= 0:
             raise SystemExit("max_log_bytes must be a positive integer")
-        create_broker(
+        server = create_broker(
             executor_host=executor_host,
             executor_port=executor_port,
             max_log_bytes=max_log_bytes,
@@ -99,16 +103,20 @@ def main(argv=None):
             max_completed_services=broker_config.get("max_completed_services", 100),
             max_completed_tasks=broker_config.get("max_completed_tasks", 100),
             max_pending_tasks=broker_config.get("max_pending_tasks", 32),
-        ).run(
-            "streamable-http",
-            host=host,
-            port=mcp_port,
         )
+        if output_mode == "tui":
+            import sys
+            if not sys.stdin.isatty() or not sys.stdout.isatty():
+                raise SystemExit("Broker TUI requires an interactive terminal; use broker --output-mode raw for background operation")
+            from .broker_tui import BrokerApp
+            BrokerApp(server, host, mcp_port, key).run()
+        else:
+            server.run("streamable-http", host=host, port=mcp_port)
         return
     executor_config = config.get("executor", {})
-    output_mode = args.output_mode or executor_config.get("output_mode", "raw")
-    if output_mode not in {"raw", "prefixed"}:
-        raise SystemExit("executor.output_mode must be raw or prefixed")
+    output_mode = args.output_mode or executor_config.get("output_mode", "tui")
+    if output_mode not in {"raw", "prefixed", "tui"}:
+        raise SystemExit("executor.output_mode must be raw or prefixed or tui")
     key = os.environ.get("BROKER_KEY", executor_config.get("key", config.get("broker", {}).get("key")))
     try:
         validate_key(key)
@@ -144,6 +152,16 @@ def main(argv=None):
         executor_id = input("Executor name: ").strip()
     if not executor_id:
         raise SystemExit("executor name cannot be empty")
+    if output_mode == "tui":
+        import sys
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise SystemExit("TUI mode requires an interactive terminal; use raw or prefixed when redirecting output")
+        try:
+            from .executor_tui import ExecutorApp
+        except ImportError:
+            raise SystemExit('TUI mode requires Textual: python -m pip install "execution-broker[tui] @ git+https://github.com/hustzxd/broker.git"') from None
+        ExecutorApp(broker_url, executor_id, key).run()
+        return
     try:
         asyncio.run(run_executor(broker_url, executor_id, interactive=True, key=key, output_mode=output_mode))
     except BrokerConnectionError as exc:

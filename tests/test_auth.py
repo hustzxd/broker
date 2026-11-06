@@ -177,11 +177,11 @@ class KeyConfigTests(unittest.TestCase):
                 path.write_text(config)
                 with patch.dict(os.environ, {}, clear=True):
                     with patch("broker.cli.run_executor", AsyncMock()) as run:
-                        main(["--config", str(path), "executor", "--broker-url", "ws://test", "--executor-id", "test"])
+                        main(["--config", str(path), "executor", "--broker-url", "ws://test", "--executor-id", "test", "--output-mode", "raw"])
                         self.assertEqual(run.call_args.kwargs["key"], expected)
                 with patch.dict(os.environ, {"BROKER_KEY": "environment"}):
                     with patch("broker.cli.run_executor", AsyncMock()) as run:
-                        main(["--config", str(path), "executor", "--broker-url", "ws://test", "--executor-id", "test"])
+                        main(["--config", str(path), "executor", "--broker-url", "ws://test", "--executor-id", "test", "--output-mode", "raw"])
                         self.assertEqual(run.call_args.kwargs["key"], "environment")
             path.write_text("executor:\n  broker_url: ws://test\n")
             with patch.dict(os.environ, {}, clear=True):

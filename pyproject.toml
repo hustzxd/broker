@@ -12,10 +12,14 @@ dependencies = [
     "mcp>=2,<3",
     "PyYAML",
     "websockets>=14",
+    "textual>=8.2,<9",
 ]
 
 [project.scripts]
 broker = "broker.cli:main"
+
+[project.optional-dependencies]
+tui = ["textual>=8.2,<9"]
 
 [tool.setuptools.dynamic]
 version = {attr = "broker.version.__version__"}

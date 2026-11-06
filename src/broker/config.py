@@ -14,6 +14,7 @@ from .auth import validate_key
 DEFAULT_CONFIG_PATH = "~/.broker/config.yaml"
 DEFAULT_CONFIG = {
     "broker": {
+        "output_mode": "tui",
         "mcp_host": "127.0.0.1",
         "mcp_port": 8273,
         "executor_host": "127.0.0.1",
@@ -25,7 +26,7 @@ DEFAULT_CONFIG = {
     },
     "executor": {
         "broker_url": "ws://127.0.0.1:8272",
-        "output_mode": "raw",
+        "output_mode": "tui",
     },
 }
 
