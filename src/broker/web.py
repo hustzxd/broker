@@ -1,6 +1,8 @@
 """Same-port web dashboard backed by the broker's existing state and controls."""
 
 from pathlib import Path
+from collections import OrderedDict
+import json
 
 from mcp.server.mcpserver.exceptions import ToolError
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse
@@ -16,11 +18,55 @@ HEADERS = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
-    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 }
 
 
 def web_routes(broker):
+    rendered_logs = OrderedDict()
+    cache_bytes = 0
+    max_cache_bytes = 8 * 1024 * 1024
+
+    def cross_origin(request):
+        origin = request.headers.get("origin")
+        return origin and origin != f"{request.url.scheme}://{request.url.netloc}"
+
+    async def clear_history(request):
+        nonlocal cache_bytes
+        if cross_origin(request):
+            return JSONResponse({"error": "Cross-origin controls are not allowed"}, status_code=403, headers=HEADERS)
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 8192:
+                return JSONResponse({"error": "Request too large"}, status_code=413, headers=HEADERS)
+        try:
+            data = json.loads(body)
+            executor_id = data.get("executor_id") if isinstance(data, dict) else None
+        except ValueError:
+            executor_id = None
+        if not isinstance(executor_id, str) or not executor_id:
+            return JSONResponse({"error": "executor_id is required"}, status_code=400, headers=HEADERS)
+        # No await between the online check and deletion: a concurrent reconnect
+        # cannot lose new tasks or services during this operation.
+        if executor_id in broker.executors:
+            return JSONResponse({"error": "Executor is online; history was not cleared"}, status_code=409, headers=HEADERS)
+        tasks = [key for key, value in broker.tasks.items() if value["executor_id"] == executor_id]
+        services = [key for key, value in broker.services.items() if value["executor_id"] == executor_id]
+        for key in tasks:
+            if not broker.tasks[key]["done"].is_set():
+                return JSONResponse({"error": "Unfinished task exists; history was not cleared"}, status_code=409, headers=HEADERS)
+        for key in services:
+            if broker.services[key]["status"] not in {"stopped", "failed"}:
+                return JSONResponse({"error": "Active service exists; history was not cleared"}, status_code=409, headers=HEADERS)
+        for kind, keys, records in (("tasks", tasks, broker.tasks), ("services", services, broker.services)):
+            for key in keys:
+                records.pop(key)
+                cached = rendered_logs.pop((kind, key), None)
+                if cached:
+                    cache_bytes -= cached[2]
+        return JSONResponse({"tasks_deleted": len(tasks), "services_deleted": len(services)}, headers=HEADERS)
+
     async def page(request):
         if request.url.path == "/ui":
             return RedirectResponse("/ui/", headers=HEADERS)
@@ -38,6 +84,12 @@ def web_routes(broker):
         }, headers=HEADERS)
 
     async def logs(request):
+        nonlocal cache_bytes
+        # Evicted broker records must not keep their rendered logs alive.
+        for cache_key in list(rendered_logs):
+            records = broker.tasks if cache_key[0] == "tasks" else broker.services
+            if cache_key[1] not in records:
+                cache_bytes -= rendered_logs.pop(cache_key)[2]
         kind, run_id = request.path_params["kind"], request.path_params["run_id"]
         if kind not in {"tasks", "services"}:
             return JSONResponse({"error": "Unknown record type"}, status_code=404, headers=HEADERS)
@@ -48,15 +100,28 @@ def web_routes(broker):
         revision = str(buffer.total)
         if request.query_params.get("revision") == revision:
             return JSONResponse({"revision": revision, "unchanged": True}, headers=HEADERS)
+        cache_key = (kind, run_id)
+        cached = rendered_logs.get(cache_key)
+        if cached is not None and cached[0] == revision:
+            rendered_logs.move_to_end(cache_key)
+            return JSONResponse(cached[1], headers=HEADERS)
         result = buffer.read()
         text = render_output("".join(item["data"] for item in result["entries"]))
-        return JSONResponse({"text": text, "truncated": result["truncated"], "revision": revision}, headers=HEADERS)
+        payload = {"text": text, "truncated": result["truncated"], "revision": revision}
+        size = len(text.encode("utf-8"))
+        if cached is not None:
+            cache_bytes -= rendered_logs.pop(cache_key)[2]
+        if size <= max_cache_bytes:
+            rendered_logs[cache_key] = (revision, payload, size)
+            cache_bytes += size
+            while cache_bytes > max_cache_bytes or len(rendered_logs) > 32:
+                cache_bytes -= rendered_logs.popitem(last=False)[1][2]
+        return JSONResponse(payload, headers=HEADERS)
 
     async def control(request):
         if request.path_params["kind"] not in {"tasks", "services"}:
             return JSONResponse({"error": "Unknown record type"}, status_code=404, headers=HEADERS)
-        origin = request.headers.get("origin")
-        if origin and origin != f"{request.url.scheme}://{request.url.netloc}":
+        if cross_origin(request):
             return JSONResponse({"error": "Cross-origin controls are not allowed"}, status_code=403, headers=HEADERS)
         run_id = request.path_params["run_id"]
         try:
@@ -73,7 +138,9 @@ def web_routes(broker):
     return [
         Route("/ui", page), Route("/ui/", page),
         Route("/ui/app.js", asset), Route("/ui/style.css", asset),
+        Route("/ui/favicon.svg", asset),
         Route("/ui/api/state", state),
+        Route("/ui/api/history/clear", clear_history, methods=["POST"]),
         Route("/ui/api/{kind}/{run_id}/logs", logs),
         Route("/ui/api/{kind}/{run_id}/stop", control, methods=["POST"]),
     ]

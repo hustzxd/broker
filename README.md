@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.27
+# broker v0.1.35
 ```
 
 ## Start the broker
@@ -39,9 +39,29 @@ The Web UI starts with the broker on the same HTTP port: open
 `http://127.0.0.1:8273/ui/` (also shown as a clickable link in the broker TUI) and enter `broker.key`. It groups Tasks/Services by
 executor and supports live progress logs, collapse/expand, pause-follow and
 cancel/stop controls. The key is kept in the tab's session storage so refreshing
-reconnects automatically. Disconnecting or an authentication failure clears it;
+reconnects automatically. An authentication failure clears it;
 closing the tab ends the session. Both TUI and raw server modes include the Web UI; closing the broker stops
 it too. Remote access needs HTTPS or an encrypted tunnel, just like MCP.
+
+Web navigation remembers the executor/category, expanded cards, follow mode,
+search filters and scroll positions within the tab session. Records are newest
+first and can be filtered by status or searched by name, command and ID. Expanded
+logs support keyword line filtering, copying and `.txt` download of the loaded
+retained text (not only matching lines). Pause follow for a stable snapshot.
+Polling pauses in background tabs; connection failures show the last update and
+retry countdown with backoff up to 30 seconds. Offline history can be cleared
+after confirmation; online or active records are protected. Server-side rendered
+logs use a bounded cache. No server log files are created.
+
+Use the header theme switch for dark/light mode; the browser remembers this preference independently of login.
+
+Service completion/failure produces in-page reminders and unread counts in the
+header, executor sidebar and Services tab. Click a reminder to open its service;
+explicitly expanding details marks it read, or use “标为已读” / “全部已读”.
+Automatically restoring an open card after refresh/navigation never clears unread reminders.
+Initial history is quiet; unread state survives refresh within the tab session.
+Background tabs catch up on return. Tasks never trigger reminders; no desktop
+notification permission or sound is used.
 
 ## Start an executor
 
@@ -158,6 +178,7 @@ start_service(executor_id="demo", name="tensorboard",
 - Cards start collapsed; task titles preview up to 60 command characters, with `…` for longer commands. Expand to see the full command. Click a title to expand; F2/F3 expand/collapse the current view. Pause follow to scroll/select logs; Ctrl+C copies, Ctrl+Q exits and closes connections or cleans up local processes.
 - TUI logs interpret carriage returns and common cursor/erase controls so tqdm progress bars update in place. Raw broker output stays unchanged; this is not a full terminal emulator.
 - Executors reconnect with backoff. Unfinished tasks become `lost` when the broker detects a disconnect and are never replayed. Services stop on disconnect; they do not survive reconnects.
+- Task/service details show lifecycle timestamps in the viewer's local timezone; elapsed durations remain visible.
 - History is memory-only. Broker defaults: 1 MiB output per task/service, 100 completed tasks, 100 finished services, 32 unfinished commands per executor. Old history is evicted; excess commands return `queue_full`.
 
 Optional broker settings in `config.yaml`:
@@ -186,6 +207,13 @@ To rotate credentials, change `broker.key`, restart the broker and update client
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+Web DOM regression (requires Node.js and jsdom):
+
+```bash
+npm install --prefix /tmp/broker-web-tests --no-save jsdom
+NODE_PATH=/tmp/broker-web-tests/node_modules node tests/web_ui.cjs
 ```
 
 For each completed change, bump the patch version in `src/broker/version.py`, update both README version examples and verify CLI/package metadata agree.

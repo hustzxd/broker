@@ -5,6 +5,7 @@ from collections import OrderedDict
 import logging
 import re
 import time
+from datetime import datetime
 
 from rich.text import Text
 from rich.markup import escape
@@ -46,6 +47,10 @@ def format_duration(seconds):
     return " ".join(parts)
 
 
+def format_timestamp(timestamp):
+    return datetime.fromtimestamp(timestamp).astimezone().isoformat(sep=" ", timespec="seconds")
+
+
 class RunCard(Collapsible):
     def __init__(self, run_id, kind, name, command):
         self.run_id = run_id
@@ -58,6 +63,7 @@ class RunCard(Collapsible):
         self.started_at = None
         self.finished_at = None
         self.details = {}
+        self.timestamps = {"received_at": time.time()}
         self.buffer = LogBuffer(DEFAULT_MAX_LOG_BYTES)
         self.dirty = True
         self.follow = True
@@ -98,7 +104,9 @@ class RunCard(Collapsible):
             return
         self.refresh_title()
         self.query_one(".stop", Button).disabled = self.status in TERMINAL or self.status in {"cancelling", "stopping"}
+        timestamps = " · ".join(f"{key}: {format_timestamp(value)}" for key, value in self.timestamps.items() if value is not None)
         details = " · ".join(f"{key}: {value}" for key, value in self.details.items())
+        details = "\n".join(part for part in (timestamps, details) if part)
         self.query_one(".details", Static).update(Text(plain(details)))
         if not self.dirty:
             return
@@ -210,6 +218,7 @@ class ExecutorApp(App):
             if card.status not in TERMINAL:
                 card.status = "lost" if card.kind == "task" else "failed"
                 card.finished_at = time.monotonic()
+                card.timestamps["finished_at"] = time.time()
                 card.details["reason"] = "Connection closed; local processes are being cleaned up"
 
     def event(self, event):
@@ -229,6 +238,7 @@ class ExecutorApp(App):
             card.dirty = True
         elif kind == "task_started":
             card.started_at = time.monotonic()
+            card.timestamps["started_at"] = time.time()
             card.details["waited"] = f"{card.started_at - card.received_at:.2f}s"
             if card.status != "cancelling":
                 card.status = "running"
@@ -236,10 +246,15 @@ class ExecutorApp(App):
             status = event.get("status", "completed")
             if card.status not in TERMINAL and not (card.status == "stopping" and status in {"starting", "ready"}):
                 card.status = status
+                if status == "starting" and event.get("pid") is not None:
+                    card.timestamps.setdefault("started_at", time.time())
+                if status == "ready":
+                    card.timestamps.setdefault("ready_at", time.time())
                 if status == "ready" and card.started_at is None:
                     card.started_at = time.monotonic()
                 if status in TERMINAL:
                     card.finished_at = time.monotonic()
+                    card.timestamps["finished_at"] = time.time()
             for name in ("pid", "returncode", "error"):
                 if name in event:
                     card.details[name] = event[name]

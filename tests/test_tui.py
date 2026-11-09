@@ -22,6 +22,28 @@ async def idle_runner(*args, **kwargs):
 
 @unittest.skipUnless(HAS_TEXTUAL, "Install execution-broker[tui] to test the interactive UI")
 class TuiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_card_timestamps_use_local_wall_clock_and_preserve_duration(self):
+        from broker.executor_tui import format_timestamp
+
+        app = ExecutorApp("ws://test", "demo", "secret", runner=idle_runner)
+        async with app.run_test(size=(110, 40)) as pilot:
+            with patch("broker.executor_tui.time.time", return_value=1794182400):
+                app.event({"type": "start_service", "service_id": "timed", "name": "timed", "command": "serve"})
+            with patch("broker.executor_tui.time.time", return_value=1794182401):
+                app.event({"type": "service_status", "service_id": "timed", "status": "starting", "pid": 123})
+            with patch("broker.executor_tui.time.time", return_value=1794182402):
+                app.event({"type": "service_status", "service_id": "timed", "status": "ready"})
+            with patch("broker.executor_tui.time.time", return_value=1794182403):
+                app.event({"type": "service_status", "service_id": "timed", "status": "stopped", "returncode": 0})
+            await pilot.pause(0.3)
+            card = app.cards["timed"]
+            self.assertEqual(card.timestamps["started_at"], 1794182401)
+            details = str(card.query_one(".details").render())
+            for timestamp in range(1794182400, 1794182404):
+                self.assertIn(format_timestamp(timestamp), details)
+            self.assertIsNotNone(card.finished_at)
+            await app.action_quit()
+
     async def test_progress_refreshes_in_place_and_raw_output_is_retained(self):
         app = ExecutorApp("ws://test", "demo", "secret", runner=idle_runner)
         async with app.run_test(size=(100, 35)) as pilot:
@@ -140,8 +162,10 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                     await wait_until(lambda: broker.get_task(queued["task_id"])["status"] == "cancelled")
                     app.cards[queued["task_id"]].collapsed = True
                     app.cards[run_id].collapsed = False
-                    await pilot.pause()
-                    await pilot.click(f"#run-{run_id} .stop")
+                    await pilot.pause(0.3)
+                    app.cards[run_id].query_one(".stop").scroll_visible(animate=False)
+                    await pilot.pause(0.3)
+                    self.assertTrue(await pilot.click(f"#run-{run_id} .stop"))
                     await wait_until(lambda: broker.get_task(run_id)["status"] == "cancelled")
                     self.assertEqual(app.cards[run_id].status, "cancelled")
                     self.assertTrue(app.cards[run_id].buffer.read()["entries"] or not broker.get_task(run_id)["output"])

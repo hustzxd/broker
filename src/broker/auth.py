@@ -33,7 +33,7 @@ class BearerKeyMiddleware:
             # Only the login page and its fixed assets are public; APIs and MCP
             # still authenticate every request, including existing sessions.
             if scope["method"] in {"GET", "HEAD"} and scope["path"] in {
-                "/ui", "/ui/", "/ui/app.js", "/ui/style.css",
+                "/ui", "/ui/", "/ui/app.js", "/ui/style.css", "/ui/favicon.svg",
             }:
                 await self.app(scope, receive, send)
                 return

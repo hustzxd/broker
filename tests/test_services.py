@@ -16,6 +16,20 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = task_tests.CancelTaskTests.asyncTearDown
     wait_until = task_tests.CancelTaskTests.wait_until
 
+    async def test_service_lifecycle_timestamps(self):
+        service = await self.broker.start_service("test", "timestamps", python_command("import time; time.sleep(60)"))
+        service_id = service["service_id"]
+        await self.wait_until(lambda: self.broker.get_service(service_id)["status"] == "ready")
+        ready = self.broker.get_service(service_id)
+        self.assertLessEqual(ready["submitted_at"], ready["started_at"])
+        self.assertLessEqual(ready["started_at"], ready["ready_at"])
+        self.assertIsNone(ready["finished_at"])
+        await self.broker.stop_service(service_id)
+        await self.wait_until(lambda: self.broker.get_service(service_id)["status"] == "stopped")
+        finished = self.broker.get_service(service_id)
+        self.assertLessEqual(finished["ready_at"], finished["finished_at"])
+        self.assertEqual(finished["started_at"], ready["started_at"])
+
     async def test_stop_escalates_without_blocking_command_reception(self):
         original_wait_for = asyncio.wait_for
         killpg = executor.os.killpg

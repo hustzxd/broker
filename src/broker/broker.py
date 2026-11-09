@@ -134,6 +134,10 @@ class ExecutionBroker:
                                 if key in event
                             }
                         )
+                        if event.get("status") == "starting" and event.get("pid") is not None and service.get("started_at") is None:
+                            service["started_at"] = time.time()
+                        if event.get("status") == "ready" and service.get("ready_at") is None:
+                            service["ready_at"] = time.time()
                         if event.get("status") in TERMINAL_SERVICE_STATUSES:
                             service["finished_at"] = time.time()
                             self._prune_services()
@@ -292,6 +296,10 @@ class ExecutionBroker:
             "name": name,
             "command": command,
             "status": "starting",
+            "submitted_at": time.time(),
+            "started_at": None,
+            "ready_at": None,
+            "finished_at": None,
             "logs": LogBuffer(self.max_log_bytes),
         }
         try:

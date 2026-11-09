@@ -4,23 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Broker · 控制台</title>
+  <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg">
   <link rel="stylesheet" href="/ui/style.css">
   <script src="/ui/app.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="/ui/">B<span>Broker</span></a><span id="connection" role="status">等待连接</span><button id="logout" hidden>断开连接</button></header>
+  <header><a class="brand" href="/ui/">B<span>Broker</span></a><span id="connection" role="status">等待连接</span><span id="last-update"></span><div class="header-actions"><button id="notifications-toggle" hidden aria-expanded="false" aria-controls="notifications">服务提醒 <span id="unread-total">0</span></button><button id="theme-toggle" aria-label="切换到浅色主题" aria-pressed="false">浅色主题</button></div></header>
+  <section id="notifications" hidden aria-label="服务提醒"><div class="notification-heading"><strong>服务提醒</strong><button id="read-all">全部已读</button><button id="notifications-close" aria-label="关闭服务提醒">关闭</button></div><p id="notification-empty">暂无未读服务提醒</p><div id="notification-list"></div></section>
+  <button id="service-announcement" aria-live="polite" hidden></button>
   <section id="login" class="login">
     <span class="eyebrow">EXECUTION CONSOLE</span><h1>连接你的执行环境</h1>
     <p>使用中心 Broker 的 Key 查看任务、服务与实时输出。</p>
     <form id="login-form"><label for="key">Broker Key</label><div class="key-row"><input id="key" type="password" required autocomplete="off" placeholder="输入 broker.key" spellcheck="false"><button class="primary" type="submit">连接 →</button></div></form>
-    <p class="hint">Key 在当前标签页会话中保存，刷新后自动连接；点击“断开连接”可清除。远程访问请使用 HTTPS 或加密隧道。</p>
+    <p class="hint">Key 在当前标签页会话中保存，刷新后自动连接，认证失效时自动清除。远程访问请使用 HTTPS 或加密隧道。</p>
   </section>
   <div id="dashboard" hidden>
     <aside><div class="sidebar-title">EXECUTORS <span id="executor-count">0</span></div><nav id="executors" aria-label="执行器"></nav><div class="sidebar-note">日志仅保存在内存中<br>历史淘汰后将不再展示</div></aside>
     <main>
-      <div class="workspace-heading"><div><span class="eyebrow">WORKSPACE</span><h1 id="executor-title">选择执行器</h1><p id="executor-meta"></p></div><span id="version" class="badge"></span></div>
-      <div class="metrics"><div><span>运行中</span><strong id="active-count">0</strong></div><div><span>排队中</span><strong id="queued-count">0</strong></div><div><span>已结束</span><strong id="finished-count">0</strong></div></div>
-      <div class="toolbar"><div class="tabs" role="tablist"><button id="tasks-tab" class="active" role="tab" aria-selected="true">Tasks <span id="task-count">0</span></button><button id="services-tab" role="tab" aria-selected="false">Services <span id="service-count">0</span></button></div><span class="live"><i></i> 每秒刷新</span></div>
+      <div class="workspace-heading"><div><span class="eyebrow">WORKSPACE</span><h1 id="executor-title">选择执行器</h1><p id="executor-meta"></p></div><div class="workspace-actions"><span id="version" class="badge"></span><button id="clear-history" hidden>清除离线历史</button></div></div>
+      <div class="toolbar"><div class="tabs" role="tablist"><button id="tasks-tab" class="active" role="tab" aria-selected="true">Tasks <span id="task-count">0</span></button><button id="services-tab" role="tab" aria-selected="false">Services <span id="service-count">0</span><span id="service-unread" class="unread-badge" hidden></span></button></div><span class="live"><i></i> <span id="live-status">每秒刷新</span></span></div>
+      <div class="filters"><input id="run-search" type="search" placeholder="搜索名称、命令或 ID" aria-label="搜索任务或服务"><select id="status-filter" aria-label="筛选状态"><option value="all">全部状态</option><option value="active">运行中</option><option value="queued">排队中</option><option value="finished">已结束</option><option value="failed">失败 / 丢失</option></select></div>
       <div id="runs"></div><div id="empty" class="empty">暂无任务。通过 MCP 向此 executor 提交命令后，将在这里显示。</div>
     </main>
   </div>

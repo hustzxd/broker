@@ -151,6 +151,8 @@ class BrokerApp(App):
                     await self.query_one(f"#{identifier}-{kind}", VerticalScroll).mount(card)
                 card.status = record["status"]
                 card.details = {key: record[key] for key in ("pid", "returncode", "error") if key in record}
+                card.timestamps = {key: record[key] for key in ("submitted_at", "started_at", "ready_at", "finished_at")
+                                   if record.get(key) is not None}
                 if kind == "task":
                     # Cards use monotonic time; translate broker wall-clock timestamps.
                     offset = time.monotonic() - time.time()
@@ -158,10 +160,10 @@ class BrokerApp(App):
                     card.finished_at = record["finished_at"] + offset if record["finished_at"] else None
                     if record["started_at"]:
                         card.details["waited"] = f"{record['started_at'] - record['submitted_at']:.2f}s"
-                elif card.status == "ready" and card.started_at is None:
-                    card.started_at = time.monotonic()
-                elif card.status in TERMINAL and card.finished_at is None:
-                    card.finished_at = time.monotonic()
+                else:
+                    offset = time.monotonic() - time.time()
+                    card.started_at = record["started_at"] + offset if record.get("started_at") is not None else None
+                    card.finished_at = record["finished_at"] + offset if record.get("finished_at") is not None else None
                 if self.log_totals.get(run_id) != card.buffer.total:
                     card.dirty = True
                     self.log_totals[run_id] = card.buffer.total

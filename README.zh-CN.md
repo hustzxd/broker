@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.27
+# broker v0.1.35
 ```
 
 ## 启动中心 Broker
@@ -35,7 +35,13 @@ broker --output-mode raw   # 普通日志，适合后台运行
 broker --mcp-host 0.0.0.0 --executor-host 0.0.0.0
 ```
 
-Web UI 随 broker 一起启动，共用 HTTP 端口。中心 TUI 提供完整的可点击链接；打开 `http://127.0.0.1:8273/ui/`，输入 `broker.key` 即可按 executor 查看 Tasks/Services、实时进度日志，展开/折叠、暂停跟随，并取消任务或停止服务。Key 保存在当前标签页的会话存储中，刷新后自动连接；点击“断开连接”或认证失效时清除，关闭标签页结束会话。TUI 和 raw 模式均提供 Web UI，broker 退出时一起关闭；远程访问同样需要 HTTPS 或加密隧道。
+Web UI 随 broker 一起启动，共用 HTTP 端口。中心 TUI 提供完整的可点击链接；打开 `http://127.0.0.1:8273/ui/`，输入 `broker.key` 即可按 executor 查看 Tasks/Services、实时进度日志，展开/折叠、暂停跟随，并取消任务或停止服务。Key 保存在当前标签页的会话存储中，刷新后自动连接；认证失效时自动清除，关闭标签页结束会话。TUI 和 raw 模式均提供 Web UI，broker 退出时一起关闭；远程访问同样需要 HTTPS 或加密隧道。
+
+Web 页面会在标签页会话中保留 executor/分类选择、卡片展开、跟随模式、搜索筛选和滚动位置。记录按最新提交排序，可按状态筛选或搜索名称、命令和 ID；日志支持关键词筛选匹配行、复制与下载 `.txt`，复制/下载包含已加载的完整保留文本，不仅是匹配行。暂停跟随可固定当前快照。后台标签页暂停轮询，连接失败时显示最后更新时间和最长 30 秒的退避重试倒计时。离线历史可确认后清除，在线和活跃记录受保护；服务端渲染日志使用限量缓存，不新增日志文件。
+
+顶部主题按钮可切换深色/浅色，浏览器会记住主题偏好，不影响登录状态。
+
+Service 结束或失败时提供页面内提醒，顶部、executor 侧栏和 Services 页签显示未读数。点击提醒可定位并展开服务，主动展开详情标为已读，也可点击“标为已读”或“全部已读”；刷新/切换视图时自动恢复展开状态不会清除未读。首次加载不提醒已有历史；未读状态在当前标签页会话中保存，刷新不重复弹提醒，后台标签页返回后同步。Task 不提醒，不申请桌面通知权限或播放声音。
 
 ## 启动 Executor
 
@@ -152,6 +158,7 @@ start_service(executor_id="demo", name="tensorboard",
 - 卡片默认折叠，任务标题预览最多 60 个命令字符，超长以 `…` 截断，展开可查看完整命令。点击标题展开，F2/F3 展开/折叠当前视图。暂停跟随后可滚动和选择日志，Ctrl+C 复制；Ctrl+Q 退出并关闭连接或清理本地进程。
 - TUI 日志识别回车及常见光标移动/清行指令，tqdm 进度条可原位刷新；broker 原始输出不变，不提供完整终端模拟。
 - Executor 断线后按退避重连。Broker 检测到断线后，未完成任务变为 `lost`，不会自动重放；服务在断线后停止，不跨连接恢复。
+- 任务和服务详情展示本地时区的生命周期时间戳（提交、启动、就绪、结束），同时保留耗时显示。
 - 历史仅存内存。Broker 默认每个任务/服务保留 1 MiB 输出、100 个已完成任务、100 个终态服务，每个 executor 最多 32 个未完成命令。旧历史会淘汰，超额提交返回 `queue_full`。
 
 可在 `config.yaml` 中调整：
@@ -180,6 +187,13 @@ broker doctor --url https://broker.example.com/mcp
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+Web DOM 回归（需要 Node.js 和 jsdom）：
+
+```bash
+npm install --prefix /tmp/broker-web-tests --no-save jsdom
+NODE_PATH=/tmp/broker-web-tests/node_modules node tests/web_ui.cjs
 ```
 
 每项完成的变更递增 `src/broker/version.py` 的补丁版本，同步两份 README 的版本示例，并核对 CLI 与包元数据版本一致。
