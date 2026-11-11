@@ -1,6 +1,12 @@
 "use strict";
 (() => {
   const $ = id => document.getElementById(id);
+  $("environment-toggle").addEventListener("click", () => {
+    const open = $("executor-meta").hidden;
+    $("executor-meta").hidden = !open;
+    $("environment-toggle").setAttribute("aria-expanded", String(open));
+    $("environment-toggle").textContent = open ? "环境信息 ▾" : "环境信息 ▸";
+  });
   function applyTheme(theme) {
     const light = theme === "light";
     document.documentElement.dataset.theme = light ? "light" : "dark";
@@ -211,11 +217,50 @@
         hour12: false, timeZoneName: "short",
       })).join(" · ");
   }
+  function operationIcon(record) {
+    // Presentation hint only: never parse or execute the command as shell code.
+    const words = record.command.match(/"[^"\n]*"|'[^'\n]*'|[^\s]+/g) || [];
+    let index = 0;
+    while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index++;
+    if (words[index] === "env") {
+      index++;
+      while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index++;
+    }
+    const command = (words[index] || "").replace(/^["']|["']$/g, "").split("/").pop();
+    let kind = "terminal";
+    if (record.service_id) kind = "service";
+    else if (command === "git") kind = "git";
+    else if (["rg", "grep", "egrep", "fgrep", "find", "fd"].includes(command)) kind = "search";
+    else if (/^python(?:\d+(?:\.\d+)*)?$/.test(command)) kind = "python";
+    else if (["cat", "head", "tail", "less", "more", "sed", "awk", "ls", "pwd"].includes(command)) kind = "file";
+    else if (["curl", "wget", "ping", "ping6", "ssh"].includes(command)) kind = "network";
+    const icons = {
+      terminal: ["终端命令", ["M4 4h16v16H4z", "m8 9 3 3-3 3", "M13 16h4"]],
+      git: ["Git", ["M7 7v10", "M7 12c0-5 10 0 10-5", "M7 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4", "M7 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4", "M17 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4"]],
+      search: ["搜索", ["M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14", "m15 15 6 6"]],
+      python: ["Python", ["M12 3H8a3 3 0 0 0-3 3v4h9v3H6a3 3 0 0 1-3-3V8", "M12 21h4a3 3 0 0 0 3-3v-4h-9v-3h8a3 3 0 0 1 3 3v2", "M9 6h.01", "M15 18h.01"]],
+      file: ["文件查看", ["M6 3h8l4 4v14H6z", "M14 3v5h4", "M9 12h6", "M9 16h6"]],
+      network: ["网络", ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18", "M3 12h18", "M12 3c-5 5-5 13 0 18 5-5 5-13 0-18"]],
+      service: ["服务", ["M4 3h16v7H4z", "M4 14h16v7H4z", "M7 6.5h.01", "M7 17.5h.01", "M11 6.5h6", "M11 17.5h6"]],
+    };
+    const [label, paths] = icons[kind];
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("class", "operation-icon"); icon.dataset.operation = kind;
+    icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("fill", "none");
+    icon.setAttribute("stroke", "currentColor"); icon.setAttribute("stroke-width", "1.6");
+    icon.setAttribute("stroke-linecap", "round"); icon.setAttribute("stroke-linejoin", "round");
+    icon.setAttribute("role", "img"); icon.setAttribute("aria-label", label);
+    const tooltip = document.createElementNS(icon.namespaceURI, "title"); tooltip.textContent = label; icon.append(tooltip);
+    for (const data of paths) {
+      const path = document.createElementNS(icon.namespaceURI, "path"); path.setAttribute("d", data); icon.append(path);
+    }
+    return icon;
+  }
   function createCard(record) {
     const id = record.task_id || record.service_id;
     const node = element("details"), summary = element("summary");
     const title = element("span", "run-title"), status = element("span", "state"), elapsed = element("span", "duration");
-    summary.append(title, status, elapsed);
+    summary.append(operationIcon(record), title, status, elapsed);
     const body = element("div", "run-body"), command = element("div", "command", record.command);
     const metadata = element("div", "metadata"), controls = element("div", "controls");
     const stop = element("button", "danger", category === "tasks" ? "取消任务" : "停止服务");
@@ -378,7 +423,7 @@
       card.node.classList.toggle("unread-service", category === "services" && unreadServices.has(id));
       if (card.read) card.read.hidden = !unreadServices.has(id);
       const preview = record.command.replace(/\s+/g, " ");
-      card.title.textContent = record.name || "$ " + (preview.length > 100 ? preview.slice(0, 99) + "…" : preview);
+      card.title.textContent = record.name || (preview.length > 100 ? preview.slice(0, 99) + "…" : preview);
       card.title.title = record.command;
       card.status.textContent = record.status.toUpperCase();
       card.status.className = "state " + (terminal.has(record.status) || ["running", "ready", "starting", "submitted", "cancelling", "stopping"].includes(record.status) ? record.status : "");

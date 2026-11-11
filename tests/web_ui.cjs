@@ -256,11 +256,33 @@ async function serviceNotificationsAfterBackgroundReload() {
   } finally {env.w.close();}
 }
 
+async function operationIcons() {
+  const env = setup(), {d, w} = env;
+  try {
+    const examples = [
+      ["git status", "git"], ["rg -n pattern src", "search"],
+      ["/env/bin/python3.12 train.py", "python"], ["env TOKEN=hidden python -c 'pass'", "python"],
+      ["MODE=test python script.py", "python"], ["cat README.md", "file"],
+      ["ping 127.0.0.1", "network"], ["bash run.sh", "terminal"],
+      ["echo 'python git rg'", "terminal"], ["printf '<svg onload=alert(1)>'", "terminal"],
+    ];
+    env.state.tasks = examples.map(([command], index) => ({task_id: String(index), executor_id: "a", command, status: "completed"}));
+    await env.login();
+    const icons = [...d.querySelectorAll("summary .operation-icon")];
+    assert.deepEqual(icons.map(icon => icon.dataset.operation), examples.map(([, kind]) => kind));
+    for (const icon of icons) {assert.equal(icon.namespaceURI, "http://www.w3.org/2000/svg"); assert(icon.getAttribute("aria-label"));}
+    assert.equal(d.querySelectorAll("[onload]").length, 0);
+    d.getElementById("services-tab").click();
+    assert.equal(d.querySelector("summary .operation-icon").dataset.operation, "service");
+  } finally {w.close();}
+}
+
 (async () => {
   await viewAndLogs();
   await reconnectAndCleanup();
   await themes();
   await serviceNotifications();
   await serviceNotificationsAfterBackgroundReload();
+  await operationIcons();
   console.log("Web UI regression passed: restore, logs, filters, reconnect, offline cleanup, themes and service notifications.");
 })().catch(error => {console.error(error); process.exitCode = 1;});
