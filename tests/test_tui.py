@@ -290,7 +290,7 @@ class TuiCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
             path = Path(directory) / "config.yaml"
             path.write_text("broker:\n  key: test-key\nexecutor:\n  broker_url: ws://test\n")
-            arguments = ["--config", str(path), "executor", "--executor-id", "demo"]
+            arguments = ["--config", str(path), "executor", "--executor-id", "demo", "--output-mode", "tui"]
             with patch("sys.stdin.isatty", return_value=False):
                 with self.assertRaisesRegex(SystemExit, "interactive terminal"):
                     main(arguments)
@@ -300,12 +300,13 @@ class TuiCliTests(unittest.TestCase):
                     app.assert_called_once_with("ws://test", "demo", "test-key")
                     app.return_value.run.assert_called_once()
 
-    def test_new_config_defaults_to_tui(self):
+    def test_new_config_defaults_to_raw(self):
         from broker.config import ensure_config, load_config
 
         with tempfile.TemporaryDirectory() as directory:
             path = ensure_config(str(Path(directory) / "config.yaml"))
-            self.assertEqual(load_config(path)["executor"]["output_mode"], "tui")
+            self.assertEqual(load_config(path)["executor"]["output_mode"], "raw")
+            self.assertEqual(load_config(path)["broker"]["output_mode"], "raw")
 
 
 if __name__ == "__main__":

@@ -160,15 +160,19 @@ class BrokerTuiTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(HAS_TEXTUAL, "Textual required")
 class BrokerTuiCliTests(unittest.TestCase):
-    def test_default_tui_raw_override_and_nonterminal_error(self):
+    def test_default_raw_explicit_tui_and_nonterminal_error(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
             path = Path(directory) / "config.yaml"
             path.write_text("broker:\n  key: secret\n")
             args = ["--config", str(path)]
             with patch("broker.cli.create_broker") as server:
+                with patch("sys.stdin.isatty", return_value=False):
+                    main(args)
+                server.return_value.run.assert_called_once_with("streamable-http", host="127.0.0.1", port=8273)
+                server.return_value.run.reset_mock()
                 with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True):
                     with patch("broker.broker_tui.BrokerApp") as app:
-                        main(args)
+                        main(args + ["--output-mode", "tui"])
                         app.assert_called_once_with(server.return_value, "127.0.0.1", 8273, "secret")
                         app.return_value.run.assert_called_once()
                         server.return_value.run.assert_not_called()
@@ -176,7 +180,7 @@ class BrokerTuiCliTests(unittest.TestCase):
                 server.return_value.run.assert_called_once_with("streamable-http", host="127.0.0.1", port=8273)
                 with patch("sys.stdin.isatty", return_value=False):
                     with self.assertRaisesRegex(SystemExit, "interactive terminal"):
-                        main(args)
+                        main(args + ["--output-mode", "tui"])
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ def _build_parser():
     parser.add_argument("--executor-host")
     parser.add_argument("--executor-port", type=int)
     parser.add_argument("--max-log-bytes", type=int, help="retained UTF-8 log bytes per task or service")
-    parser.add_argument("--output-mode", choices=("raw", "tui"), help="broker terminal format (default: tui)")
+    parser.add_argument("--output-mode", choices=("raw", "tui"), help="broker terminal format (default: raw)")
     subparsers = parser.add_subparsers(dest="command")
     parser.set_defaults(command="broker")
 
@@ -39,7 +39,7 @@ def _build_parser():
         help="override the port in the broker WebSocket URL",
     )
     executor.add_argument("--executor-id")
-    executor.add_argument("--output-mode", choices=("raw", "prefixed", "tui"), help="local terminal output format (default: tui)")
+    executor.add_argument("--output-mode", choices=("raw", "prefixed", "tui"), help="local terminal output format (default: raw)")
     doctor = subparsers.add_parser("doctor", help="check MCP connectivity, key and tool discovery")
     doctor.add_argument("--url", help="MCP URL; defaults to the configured broker listener")
     return parser
@@ -79,7 +79,7 @@ def main(argv=None):
     config = load_config(args.config)
     if args.command == "broker":
         broker_config = config.get("broker", {})
-        output_mode = args.output_mode or broker_config.get("output_mode", "tui")
+        output_mode = args.output_mode or broker_config.get("output_mode", "raw")
         if output_mode not in {"raw", "tui"}:
             raise SystemExit("broker.output_mode must be raw or tui")
         try:
@@ -116,7 +116,7 @@ def main(argv=None):
             server.run("streamable-http", host=host, port=mcp_port)
         return
     executor_config = config.get("executor", {})
-    output_mode = args.output_mode or executor_config.get("output_mode", "tui")
+    output_mode = args.output_mode or executor_config.get("output_mode", "raw")
     if output_mode not in {"raw", "prefixed", "tui"}:
         raise SystemExit("executor.output_mode must be raw or prefixed or tui")
     key = os.environ.get("BROKER_KEY", executor_config.get("key", config.get("broker", {}).get("key")))
