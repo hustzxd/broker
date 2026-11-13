@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -15,6 +16,7 @@ from .protocol import message, request_id, validate_service
 from .logs import DEFAULT_MAX_LOG_BYTES, LogBuffer
 from .auth import BearerKeyMiddleware, executor_auth, validate_key
 from .version import __version__, warn_version_mismatch
+from .paseo import completion_prompt, send_completion, validate_target
 
 logger = logging.getLogger(__name__)
 ACTIVE_SERVICE_STATUSES = {"starting", "ready", "stopping"}
@@ -27,7 +29,8 @@ def _raise_tool_error(code, message_text):
 
 class ExecutionBroker:
     def __init__(self, max_log_bytes=DEFAULT_MAX_LOG_BYTES, max_completed_services=100,
-                 max_completed_tasks=100, max_pending_tasks=32):
+                 max_completed_tasks=100, max_pending_tasks=32, paseo_sender=None,
+                 paseo_executable="paseo"):
         if isinstance(max_log_bytes, bool) or not isinstance(max_log_bytes, int) or max_log_bytes <= 0:
             raise ValueError("max_log_bytes must be a positive integer")
         self.max_log_bytes = max_log_bytes
@@ -42,8 +45,13 @@ class ExecutionBroker:
         self.executors = {}
         self.tasks = {}
         self.services = {}
+        self._paseo_sender = paseo_sender
+        self._paseo_executable = paseo_executable
+        self._notification_tasks = set()
 
     async def shutdown(self):
+        if self._notification_tasks:
+            await asyncio.gather(*self._notification_tasks, return_exceptions=True)
         connections = [executor["websocket"] for executor in self.executors.values()]
         if connections:
             await asyncio.gather(*(connection.close() for connection in connections))
@@ -140,6 +148,7 @@ class ExecutionBroker:
                             service["ready_at"] = time.time()
                         if event.get("status") in TERMINAL_SERVICE_STATUSES:
                             service["finished_at"] = time.time()
+                            self._schedule_service_notification(service)
                             self._prune_services()
                 elif event.get("type") == "service_output":
                     service = self.services.get(event.get("service_id"))
@@ -154,6 +163,7 @@ class ExecutionBroker:
                 if service["executor_id"] == executor_id and service["status"] in ACTIVE_SERVICE_STATUSES:
                     service.update(status="failed", returncode=None, finished_at=time.time(),
                                    error="Executor disconnected; service outcome is unknown")
+                    self._schedule_service_notification(service)
             self._prune_services()
             logger.info("Executor disconnected: id=%s", executor_id)
 
@@ -180,6 +190,30 @@ class ExecutionBroker:
         )
         for service in completed[:-self.max_completed_services]:
             self.services.pop(service["service_id"], None)
+
+    def _schedule_service_notification(self, service):
+        notification = service.get("notification")
+        if not service.get("paseo") or not notification or notification["status"] != "pending":
+            return
+        notification["status"] = "sending"
+        task = asyncio.create_task(self._notify_service(service))
+        self._notification_tasks.add(task)
+        task.add_done_callback(self._notification_tasks.discard)
+
+    async def _notify_service(self, service):
+        notification = service["notification"]
+        sender = self._paseo_sender or send_completion
+        try:
+            prompt = completion_prompt(service, notification["event_id"])
+            if self._paseo_sender is None:
+                receipt = await sender(service["paseo"], prompt, executable=self._paseo_executable)
+            else:
+                receipt = await sender(service["paseo"], prompt)
+            notification.update(status="queued", receipt=receipt)
+        except Exception as exc:
+            status = "timeout" if isinstance(exc, TimeoutError) else "failed"
+            notification.update(status=status, error=str(exc))
+            logger.warning("Paseo completion notification failed: service=%s error=%s", service["service_id"], exc)
 
     def list_executors(self):
         return [
@@ -272,9 +306,10 @@ class ExecutionBroker:
             raise
         return self._task_result(task)
 
-    async def start_service(self, executor_id, name, command, ready_check=None, startup_timeout=120):
+    async def start_service(self, executor_id, name, command, ready_check=None, startup_timeout=120, paseo=None):
         try:
             validate_service(name, command, ready_check, startup_timeout)
+            paseo = validate_target(paseo)
         except ValueError as exc:
             _raise_tool_error("invalid_service", str(exc))
 
@@ -289,7 +324,23 @@ class ExecutionBroker:
             ):
                 _raise_tool_error("duplicate_service", f"Service name already exists: {name}")
 
-        service_id = request_id()
+        for _ in range(100):
+            service_id = request_id()[:6]
+            if service_id not in self.services:
+                break
+        else:
+            _raise_tool_error("service_id_unavailable", "Could not allocate a unique service ID; retry the request")
+        if paseo is not None:
+            retained_event_ids = {
+                record["notification"]["event_id"]
+                for record in self.services.values() if "notification" in record
+            }
+            for _ in range(100):
+                event_id = uuid.uuid4().hex[:6]
+                if event_id not in retained_event_ids:
+                    break
+            else:
+                _raise_tool_error("event_id_unavailable", "Could not allocate a unique event ID; retry the request")
         service = self.services[service_id] = {
             "service_id": service_id,
             "executor_id": executor_id,
@@ -302,6 +353,9 @@ class ExecutionBroker:
             "finished_at": None,
             "logs": LogBuffer(self.max_log_bytes),
         }
+        if paseo is not None:
+            service["paseo"] = paseo
+            service["notification"] = {"status": "pending", "event_id": event_id}
         try:
             await executor["websocket"].send(
                 json.dumps(
@@ -320,6 +374,7 @@ class ExecutionBroker:
                 status="failed", returncode=None, finished_at=time.time(),
                 error="Service submission failed; executor connection lost",
             )
+            self._schedule_service_notification(service)
             self._prune_services()
             return {key: value for key, value in service.items() if key != "logs"}
         logger.info("Service submitted: id=%s executor_id=%s name=%s", service_id, executor_id, name)
@@ -456,10 +511,11 @@ def create_broker(
         command: str,
         ready_check: dict | None = None,
         startup_timeout: int = 120,
+        paseo: dict | None = None,
     ) -> dict:
-        """Start a long-running service in an executor."""
+        """Start a service; optionally notify a Paseo agent when it ends."""
         return await broker.start_service(
-            executor_id, name, command, ready_check, startup_timeout
+            executor_id, name, command, ready_check, startup_timeout, paseo
         )
 
     @mcp.tool()

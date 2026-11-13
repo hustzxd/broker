@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.38
+# broker v0.1.43
 ```
 
 ## 启动中心 Broker
@@ -113,6 +113,10 @@ Codex 自动携带 Key，工具参数无需包含凭证，也不需要 OAuth 登
 - 增量查询时，将上次返回的 `next_cursor` 作为下一次的 `cursor`。
 - 需要取消命令时使用 `cancel_task`。
 - 长期服务使用 `start_service` 和相应服务管理工具。
+- `start_service` 可选传入 `paseo` 绑定（`paseo_server_id`、
+  `paseo_agent_id`，以及可选的 `paseo_host`）。服务进入 `stopped` 或
+  `failed` 后 Broker 会使用 Paseo `--no-wait` 直接发送包含服务结果的完成通知；
+  不传时保持原有 `get_service` 轮询方式。Paseo 通知失败不会改变服务结果。
 - 任务状态为 `lost` 时，先检查执行结果和副作用，再决定是否重试。
 
 ### 使用本地工具
@@ -143,6 +147,9 @@ Codex 自动携带 Key，工具参数无需包含凭证，也不需要 OAuth 登
 | `stop_service(service_id)` | 停止进程组，5 秒后仍未退出则强制终止 |
 
 同一 executor 的普通命令串行执行。`execute` 超时只结束等待，不终止命令；用 `get_task` 查询或 `cancel_task` 取消。将上次的 `next_cursor` 作为 `cursor` 传入即可增量读取，`truncated` 表示有输出被省略。服务日志返回对象包含 `logs`、`truncated` 和 `next_cursor`。
+
+新服务 ID 为 6 位十六进制字符，例如 `c6a388`。与保留服务的 ID 重复时会重新生成，已有的长 ID 仍可使用。
+通知的事件 ID 也为 6 位十六进制字符，与保留服务的事件 ID 重复时会重新生成。
 
 带 TCP 就绪检查的服务示例：
 
