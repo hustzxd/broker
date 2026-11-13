@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.43
+# broker v0.1.50
 ```
 
 ## 启动中心 Broker
@@ -42,6 +42,19 @@ Web 页面会在标签页会话中保留 executor/分类选择、卡片展开、
 顶部主题按钮可切换深色/浅色，浏览器会记住主题偏好，不影响登录状态。
 
 Service 结束或失败时提供页面内提醒，顶部、executor 侧栏和 Services 页签显示未读数。点击提醒可定位并展开服务，主动展开详情标为已读，也可点击“标为已读”或“全部已读”；刷新/切换视图时自动恢复展开状态不会清除未读。首次加载不提醒已有历史；未读状态在当前标签页会话中保存，刷新不重复弹提醒，后台标签页返回后同步。Task 不提醒，不申请桌面通知权限或播放声音。
+
+选中 executor 后，点击 **Paseo 通知**，只需填写默认接收者的 Agent ID，使用中心 Broker 的默认 Paseo。绑定保存在中心 Broker 所选 YAML 配置的 `broker.executor_paseo` 中，重启后仍有效。新建服务自动使用 executor 绑定的目标，`start_service` 不再提供 `paseo` 参数。已启动服务保留原绑定，没有绑定时仍采用轮询。同一 executor 的所有调用者默认通知同一个 Agent；启用通知时，`start_service` 返回实际采用的目标。
+
+**发送测试消息** 使用已保存的目标，请在目标 Agent 对话中确认收到，提交成功不等于实际送达。**解除绑定** 只影响后续新服务。Executor 离线时也可修改已有绑定。以 `create_broker` 嵌入运行时，需要传入 `config_path` 和已加载的 `executor_paseo` 才能持久保存网页配置。
+
+左侧 executor 列表中，已配置通知目标的条目显示 **已绑定**，悬停标签可查看 Agent ID；保存或解除绑定后自动更新。
+点击 Paseo 设置面板外部或按 Esc 可关闭面板；保持选中同一 executor 时，未保存的输入会保留。
+
+完成通知与测试消息按 Paseo Agent 分别排队，Broker 等待 `paseo wait` 返回 `idle` 后使用 `--no-wait` 发送。Agent 忙或等待权限时继续等待，不同 Agent 互不阻塞。网页展示排队、等待空闲、正在发送、发送已提交或失败状态；提交成功不代表已确认收到。等待和发送是两个调用，中间仍可能开始新 turn，因此只能尽量减少打断。队列仅存内存，Broker 重启后待发送消息会丢失；最多接受 256 条处理中或待发送消息，超限记录为失败。CLI 或 daemon 错误记录为失败，不自动重放。
+
+获取 Agent ID：在 Paseo 中，右键点击目标 Agent 的标签页，选择 **复制 Agent ID**，然后粘贴到绑定表单。
+
+请填写完整的 Paseo Agent ID，不要填写 Codex 原生 session ID。已有 API 绑定中的 `paseo_server_id`、`paseo_host` 保留兼容。
 
 ## 启动 Executor
 
@@ -113,10 +126,9 @@ Codex 自动携带 Key，工具参数无需包含凭证，也不需要 OAuth 登
 - 增量查询时，将上次返回的 `next_cursor` 作为下一次的 `cursor`。
 - 需要取消命令时使用 `cancel_task`。
 - 长期服务使用 `start_service` 和相应服务管理工具。
-- `start_service` 可选传入 `paseo` 绑定（`paseo_server_id`、
-  `paseo_agent_id`，以及可选的 `paseo_host`）。服务进入 `stopped` 或
-  `failed` 后 Broker 会使用 Paseo `--no-wait` 直接发送包含服务结果的完成通知；
-  不传时保持原有 `get_service` 轮询方式。Paseo 通知失败不会改变服务结果。
+- 在网页中给 executor 绑定 Paseo Agent，`start_service` 自动使用已保存的目标，无需也不接受 `paseo` 参数。
+  服务进入 `stopped` 或 `failed` 后，Broker 使用 Paseo `--no-wait` 发送结果；
+  executor 没有绑定时，保持原有 `get_service` 轮询方式。Paseo 通知失败不会改变服务结果。
 - 任务状态为 `lost` 时，先检查执行结果和副作用，再决定是否重试。
 
 ### 使用本地工具

@@ -45,6 +45,15 @@ function setup(saved = {}, preferences = {}, storageBlocked = false, initialStat
       env.state.tasks = env.state.tasks.filter(record => record.executor_id !== name);
       data = {tasks_deleted: 1, services_deleted: 0};
     } else if (url.endsWith("/stop")) data = {status: "cancelling"};
+    else if (url.endsWith("executor-paseo/test")) data = {status: "queued"};
+    else if (url.endsWith("executor-paseo")) {
+      if (env.bindingError) return {ok: false, status: 503, json: async () => ({error: "Cannot save binding"})};
+      const body = JSON.parse(options.body);
+      env.state.executor_paseo ||= {};
+      if (body.paseo) env.state.executor_paseo[body.executor_id] = body.paseo;
+      else delete env.state.executor_paseo[body.executor_id];
+      data = body;
+    }
     else throw Error("Unexpected endpoint: " + url);
     return {ok: true, status: 200, json: async () => data};
   };
@@ -277,6 +286,70 @@ async function operationIcons() {
   } finally {w.close();}
 }
 
+async function paseoBindings() {
+  const env = setup(), {w, d} = env;
+  try {
+    await env.login();
+    const get = id => d.getElementById(id);
+    get("paseo-toggle").click();
+    assert.equal(get("paseo-panel").hidden, false);
+    get("paseo-agent").value = "agent-a";
+    get("paseo-agent").click();
+    assert.equal(get("paseo-panel").hidden, false);
+    get("executor-title").click();
+    assert.equal(get("paseo-panel").hidden, true);
+    assert.equal(get("paseo-toggle").getAttribute("aria-expanded"), "false");
+    get("paseo-toggle").click();
+    assert.equal(get("paseo-agent").value, "agent-a");
+    get("paseo-agent").dispatchEvent(new w.KeyboardEvent("keydown", {key: "Escape", bubbles: true}));
+    assert.equal(get("paseo-panel").hidden, true);
+    assert.equal(d.activeElement, get("paseo-toggle"));
+    get("paseo-toggle").click();
+    assert.equal(get("paseo-server"), null);
+    assert.equal(get("paseo-host"), null);
+    await env.tick(); await settle();
+    assert.equal(get("paseo-agent").value, "agent-a"); // polling preserves edits
+    get("paseo-form").dispatchEvent(new w.Event("submit", {cancelable: true}));
+    await settle();
+    assert.equal(env.state.executor_paseo.a.paseo_agent_id, "agent-a");
+    assert.deepEqual(Object.keys(env.state.executor_paseo.a), ["paseo_agent_id"]);
+    assert.match(get("paseo-feedback").textContent, /绑定已保存/);
+    assert.equal(get("executors").querySelector(".paseo-bound").textContent, "已绑定");
+    assert.match(get("executors").querySelector(".paseo-bound").title, /agent-a/);
+    env.state.executor_paseo.a.paseo_agent_id = "updated-agent";
+    await env.tick(); await settle();
+    assert.match(get("executors").querySelector(".paseo-bound").title, /updated-agent/);
+    env.state.executor_paseo.a.paseo_agent_id = "agent-a";
+    await env.tick(); await settle();
+    get("paseo-test").click(); await settle();
+    assert.equal(get("paseo-panel").hidden, false);
+    assert.match(get("paseo-feedback").textContent, /已排队/);
+    env.state.paseo_tests = {a: {status: "waiting_idle"}};
+    await env.tick(); await settle();
+    assert.match(get("paseo-test-status").textContent, /等待 Agent 空闲/);
+    assert.equal(get("paseo-test").disabled, true);
+    env.state.paseo_tests.a.status = "submitted";
+    await env.tick(); await settle();
+    assert.match(get("paseo-test-status").textContent, /发送已提交/);
+    const b = [...get("executors").children].find(node => node.textContent === "b");
+    b.click();
+    assert.equal(get("paseo-agent").value, "");
+    get("paseo-toggle").click(); get("paseo-agent").value = "unsaved";
+    env.bindingError = true;
+    get("paseo-form").dispatchEvent(new w.Event("submit", {cancelable: true})); await settle();
+    assert.match(get("paseo-feedback").textContent, /Cannot save/);
+    assert.equal(get("paseo-agent").value, "unsaved");
+    env.bindingError = false;
+    [...get("executors").children].find(node => node.querySelector(".executor-name").textContent === "a").click();
+    assert.equal(get("paseo-agent").value, "agent-a");
+    get("paseo-toggle").click(); get("paseo-remove").click(); await settle();
+    assert.equal(env.state.executor_paseo.a, undefined);
+    assert.equal(get("paseo-test").disabled, true);
+    assert.match(get("paseo-feedback").textContent, /已解除绑定/);
+    assert.equal(get("executors").querySelector(".paseo-bound"), null);
+  } finally {w.close();}
+}
+
 (async () => {
   await viewAndLogs();
   await reconnectAndCleanup();
@@ -284,5 +357,6 @@ async function operationIcons() {
   await serviceNotifications();
   await serviceNotificationsAfterBackgroundReload();
   await operationIcons();
+  await paseoBindings();
   console.log("Web UI regression passed: restore, logs, filters, reconnect, offline cleanup, themes and service notifications.");
 })().catch(error => {console.error(error); process.exitCode = 1;});

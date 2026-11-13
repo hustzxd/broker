@@ -103,6 +103,8 @@ def main(argv=None):
             max_completed_services=broker_config.get("max_completed_services", 100),
             max_completed_tasks=broker_config.get("max_completed_tasks", 100),
             max_pending_tasks=broker_config.get("max_pending_tasks", 32),
+            executor_paseo=broker_config.get("executor_paseo", {}),
+            config_path=args.config,
         )
         if output_mode == "tui":
             import sys

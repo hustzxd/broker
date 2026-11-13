@@ -16,7 +16,8 @@ from .protocol import message, request_id, validate_service
 from .logs import DEFAULT_MAX_LOG_BYTES, LogBuffer
 from .auth import BearerKeyMiddleware, executor_auth, validate_key
 from .version import __version__, warn_version_mismatch
-from .paseo import completion_prompt, send_completion, validate_target
+from .paseo import completion_prompt, send_completion, validate_target, wait_until_idle
+from .config import save_executor_paseo
 
 logger = logging.getLogger(__name__)
 ACTIVE_SERVICE_STATUSES = {"starting", "ready", "stopping"}
@@ -30,7 +31,7 @@ def _raise_tool_error(code, message_text):
 class ExecutionBroker:
     def __init__(self, max_log_bytes=DEFAULT_MAX_LOG_BYTES, max_completed_services=100,
                  max_completed_tasks=100, max_pending_tasks=32, paseo_sender=None,
-                 paseo_executable="paseo"):
+                 paseo_executable="paseo", executor_paseo=None, config_path=None, paseo_waiter=None):
         if isinstance(max_log_bytes, bool) or not isinstance(max_log_bytes, int) or max_log_bytes <= 0:
             raise ValueError("max_log_bytes must be a positive integer")
         self.max_log_bytes = max_log_bytes
@@ -48,10 +49,51 @@ class ExecutionBroker:
         self._paseo_sender = paseo_sender
         self._paseo_executable = paseo_executable
         self._notification_tasks = set()
+        self._notification_queues = {}
+        self._paseo_waiter = paseo_waiter
+        self._closing = False
+        self.paseo_tests = {}
+        self.config_path = config_path
+        if executor_paseo is not None and not isinstance(executor_paseo, dict):
+            raise ValueError("executor_paseo must be an object")
+        self.executor_paseo = {}
+        for executor_id, target in (executor_paseo or {}).items():
+            self._validate_binding_executor(executor_id)
+            binding = validate_target(target)
+            if binding is not None:
+                self.executor_paseo[executor_id] = binding
+
+    @staticmethod
+    def _validate_binding_executor(executor_id):
+        if not isinstance(executor_id, str) or not executor_id.strip() or len(executor_id) > 256:
+            raise ValueError("executor_id must be a non-empty string of at most 256 characters")
+
+    def set_executor_paseo(self, executor_id, target):
+        self._validate_binding_executor(executor_id)
+        binding = validate_target(target)
+        if self.config_path is None:
+            raise ValueError("Persistent bindings require a broker configuration file")
+        bindings = {name: dict(value) for name, value in self.executor_paseo.items()}
+        if binding is None:
+            bindings.pop(executor_id, None)
+        else:
+            bindings[executor_id] = binding
+        save_executor_paseo(self.config_path, bindings)
+        self.executor_paseo = bindings
+        return binding
 
     async def shutdown(self):
+        self._closing = True
         if self._notification_tasks:
-            await asyncio.gather(*self._notification_tasks, return_exceptions=True)
+            tasks = list(self._notification_tasks)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for queue in self._notification_queues.values():
+            while not queue.empty():
+                _, _, pending = queue.get_nowait()
+                pending.update(status="cancelled", error="Broker is shutting down")
+        self._notification_queues.clear()
         connections = [executor["websocket"] for executor in self.executors.values()]
         if connections:
             await asyncio.gather(*(connection.close() for connection in connections))
@@ -195,25 +237,67 @@ class ExecutionBroker:
         notification = service.get("notification")
         if not service.get("paseo") or not notification or notification["status"] != "pending":
             return
-        notification["status"] = "sending"
-        task = asyncio.create_task(self._notify_service(service))
-        self._notification_tasks.add(task)
-        task.add_done_callback(self._notification_tasks.discard)
+        self._enqueue_notification(service["paseo"], completion_prompt(service, notification["event_id"]), notification)
 
-    async def _notify_service(self, service):
-        notification = service["notification"]
-        sender = self._paseo_sender or send_completion
+    def enqueue_paseo_test(self, executor_id):
+        target = self.executor_paseo.get(executor_id)
+        if target is None:
+            raise ValueError("Save a Paseo binding before sending a test message")
+        previous = self.paseo_tests.get(executor_id)
+        if previous and previous["status"] in {"queued", "waiting_idle", "sending"}:
+            return dict(previous)
+        notification = {"status": "pending"}
+        self._enqueue_notification(target, f"Broker Paseo test: executor={executor_id}. This is a test of the saved notification binding.", notification)
+        self.paseo_tests[executor_id] = notification
+        return dict(notification)
+
+    def _enqueue_notification(self, target, prompt, notification):
+        if self._closing:
+            notification.update(status="cancelled", error="Broker is shutting down")
+            return
+        if sum(queue.qsize() + 1 for queue in self._notification_queues.values()) >= 256:
+            notification.update(status="failed", error="Paseo notification queue is full")
+            return
+        key = (target.get("paseo_host"), target["paseo_agent_id"])
+        queue = self._notification_queues.get(key)
+        if queue is None:
+            queue = self._notification_queues[key] = asyncio.Queue()
+            task = asyncio.create_task(self._notification_worker(key, queue))
+            self._notification_tasks.add(task)
+            task.add_done_callback(self._notification_tasks.discard)
+        notification["status"] = "queued"
+        queue.put_nowait((dict(target), prompt, notification))
+
+    async def _notification_worker(self, key, queue):
         try:
-            prompt = completion_prompt(service, notification["event_id"])
-            if self._paseo_sender is None:
-                receipt = await sender(service["paseo"], prompt, executable=self._paseo_executable)
-            else:
-                receipt = await sender(service["paseo"], prompt)
-            notification.update(status="queued", receipt=receipt)
-        except Exception as exc:
-            status = "timeout" if isinstance(exc, TimeoutError) else "failed"
-            notification.update(status=status, error=str(exc))
-            logger.warning("Paseo completion notification failed: service=%s error=%s", service["service_id"], exc)
+            while not queue.empty():
+                target, prompt, notification = queue.get_nowait()
+                try:
+                    notification["status"] = "waiting_idle"
+                    if self._paseo_waiter is None:
+                        await wait_until_idle(target, executable=self._paseo_executable)
+                    else:
+                        await self._paseo_waiter(target)
+                    notification["status"] = "sending"
+                    if self._paseo_sender is None:
+                        receipt = await send_completion(target, prompt, executable=self._paseo_executable)
+                    else:
+                        receipt = await self._paseo_sender(target, prompt)
+                    if receipt.get("status") not in {"sent", "queued"} and receipt.get("deliveryStatus") != "queued":
+                        raise RuntimeError("Paseo did not accept the notification")
+                    notification.update(status="submitted", receipt=receipt)
+                except asyncio.CancelledError:
+                    notification.update(status="cancelled", error="Broker is shutting down")
+                    raise
+                except Exception as exc:
+                    status = "timeout" if isinstance(exc, TimeoutError) else "failed"
+                    notification.update(status=status, error=str(exc))
+                    logger.warning("Paseo notification failed: agent=%s error=%s", key[1], exc)
+        finally:
+            while not queue.empty():
+                _, _, pending = queue.get_nowait()
+                pending.update(status="cancelled", error="Broker is shutting down")
+            self._notification_queues.pop(key, None)
 
     def list_executors(self):
         return [
@@ -306,10 +390,10 @@ class ExecutionBroker:
             raise
         return self._task_result(task)
 
-    async def start_service(self, executor_id, name, command, ready_check=None, startup_timeout=120, paseo=None):
+    async def start_service(self, executor_id, name, command, ready_check=None, startup_timeout=120):
         try:
             validate_service(name, command, ready_check, startup_timeout)
-            paseo = validate_target(paseo)
+            paseo = validate_target(self.executor_paseo.get(executor_id))
         except ValueError as exc:
             _raise_tool_error("invalid_service", str(exc))
 
@@ -378,6 +462,9 @@ class ExecutionBroker:
             self._prune_services()
             return {key: value for key, value in service.items() if key != "logs"}
         logger.info("Service submitted: id=%s executor_id=%s name=%s", service_id, executor_id, name)
+        if paseo is not None:
+            return {"service_id": service_id, "status": "starting", "paseo": dict(paseo),
+                    "notification": dict(service["notification"])}
         return {"service_id": service_id, "status": "starting"}
 
     def list_services(self, executor_id=None, include_inactive=False):
@@ -452,11 +539,14 @@ def create_broker(
     max_pending_tasks=32,
     *,
     key,
+    executor_paseo=None,
+    config_path=None,
 ):
     validate_key(key)
     broker = ExecutionBroker(
         max_log_bytes=max_log_bytes, max_completed_services=max_completed_services,
         max_completed_tasks=max_completed_tasks, max_pending_tasks=max_pending_tasks,
+        executor_paseo=executor_paseo, config_path=config_path,
     )
 
     @asynccontextmanager
@@ -511,11 +601,10 @@ def create_broker(
         command: str,
         ready_check: dict | None = None,
         startup_timeout: int = 120,
-        paseo: dict | None = None,
     ) -> dict:
-        """Start a service; optionally notify a Paseo agent when it ends."""
+        """Start a service; use the executor's saved Paseo binding for completion notifications."""
         return await broker.start_service(
-            executor_id, name, command, ready_check, startup_timeout, paseo
+            executor_id, name, command, ready_check, startup_timeout
         )
 
     @mcp.tool()

@@ -26,6 +26,65 @@
   const keyStorage = "broker.web.key";
   let key = "", generation = 0, selected = null, category = "tasks", snapshot = null;
   let polling = false, cards = new Map();
+  let paseoEditing = null, paseoBusy = false;
+  function notificationText(notification) {
+    const labels = {pending: "等待服务结束", queued: "已排队，等待发送", waiting_idle: "等待 Agent 空闲",
+      sending: "正在发送", submitted: "发送已提交，请在目标 Agent 会话确认收到", failed: "发送失败",
+      timeout: "连接超时", cancelled: "已取消"};
+    return (labels[notification.status] || notification.status) + (notification.error ? "：" + notification.error : "");
+  }
+  function renderPaseo() {
+    $("paseo-toggle").hidden = !selected;
+    $("paseo-toggle").disabled = paseoBusy;
+    const target = snapshot?.executor_paseo?.[selected];
+    $("paseo-toggle").textContent = target ? "Paseo 通知 · 已绑定" : "Paseo 通知 · 未绑定";
+    if (paseoEditing !== selected) {
+      paseoEditing = selected;
+      $("paseo-panel").hidden = true;
+      $("paseo-toggle").setAttribute("aria-expanded", "false");
+      fillPaseo(target);
+      $("paseo-feedback").textContent = "";
+    }
+    $("paseo-executor").textContent = selected || "";
+    $("paseo-current").textContent = target ? "当前接收者：" + target.paseo_agent_id : "未绑定：服务使用原有轮询方式。";
+    const test = snapshot?.paseo_tests?.[selected];
+    $("paseo-test-status").textContent = test ? "最近测试：" + notificationText(test) : "";
+    for (const name of ["agent", "save"]) $("paseo-" + name).disabled = paseoBusy;
+    $("paseo-test").disabled = paseoBusy || !target || ["queued", "waiting_idle", "sending"].includes(test?.status);
+    $("paseo-remove").disabled = paseoBusy || !target;
+  }
+  function fillPaseo(target) {
+    $("paseo-agent").value = target?.paseo_agent_id || "";
+  }
+  async function updatePaseo(action) {
+    if (!selected || paseoBusy) return;
+    const executor = selected, current = generation;
+    const body = {executor_id: executor};
+    if (action === "save") {
+      body.paseo = {paseo_agent_id: $("paseo-agent").value.trim()};
+    } else if (action === "remove") body.paseo = null;
+    paseoBusy = true; renderPaseo();
+    $("paseo-feedback").textContent = action === "test" ? "正在发送…" : "正在保存…";
+    try {
+      const result = await api("executor-paseo" + (action === "test" ? "/test" : ""), "POST", body);
+      if (current !== generation || !snapshot) return;
+      if (action !== "test") {
+        snapshot.executor_paseo ||= {};
+        if (result.paseo) snapshot.executor_paseo[executor] = result.paseo;
+        else delete snapshot.executor_paseo[executor];
+      } else {
+        snapshot.paseo_tests ||= {};
+        snapshot.paseo_tests[executor] = result;
+      }
+      if (selected === executor) {
+        if (action !== "test") fillPaseo(result.paseo);
+        $("paseo-feedback").textContent = action === "test" ? "测试消息已排队，等待 Agent 空闲后发送。" :
+          action === "remove" ? "已解除绑定，后续服务使用轮询。" : "绑定已保存，后续新服务将自动通知此 Agent。";
+      }
+    } catch (error) {
+      if (current === generation && selected === executor) $("paseo-feedback").textContent = error.message;
+    } finally { paseoBusy = false; if (snapshot) render(); }
+  }
   const notificationStorage = "broker.web.service-notifications";
   let serviceStates = new Map(), unreadServices = new Map(), serviceBaseline = false;
   function saveNotifications() {
@@ -169,6 +228,7 @@
   function disconnect() {
     rememberKey("");
     generation++; key = ""; snapshot = null; selected = null;
+    paseoEditing = null; fillPaseo(null); $("paseo-panel").hidden = true;
     savedViews = {};
     serviceStates.clear(); unreadServices.clear(); serviceBaseline = false;
     try { sessionStorage.removeItem(notificationStorage); } catch {}
@@ -375,21 +435,29 @@
   function render() {
     const records = [...snapshot.tasks, ...snapshot.services];
     const onlineNames = new Set(snapshot.executors.map(e => e.executor_id));
-    const names = [...new Set([...onlineNames, ...records.map(r => r.executor_id)])]
+    const names = [...new Set([...onlineNames, ...records.map(r => r.executor_id), ...Object.keys(snapshot.executor_paseo || {})])]
       .sort((a, b) => Number(!onlineNames.has(a)) - Number(!onlineNames.has(b)) || (a < b ? -1 : a > b ? 1 : 0));
     if (!names.includes(selected)) selected = names[0] || null;
     $("executor-count").textContent = names.length;
     const nav = names.map(name => {
       const online = onlineNames.has(name);
       const button = element("button", name === selected ? "active" : "");
-      button.append(element("i", "dot" + (online ? "" : " offline")), element("span", "", name + (online ? "" : " · OFFLINE")));
+      button.append(element("i", "dot" + (online ? "" : " offline")), element("span", "executor-name", name + (online ? "" : " · OFFLINE")));
+      const binding = snapshot.executor_paseo?.[name];
+      if (binding) {
+        const badge = element("span", "paseo-bound", "已绑定");
+        badge.title = "Paseo Agent: " + binding.paseo_agent_id;
+        badge.setAttribute("aria-label", "已绑定 Paseo Agent " + binding.paseo_agent_id);
+        button.append(badge);
+      }
       const unread = unreadCount(name);
       if (unread) button.append(element("span", "unread-badge", String(unread)));
       button.addEventListener("click", () => switchView(name, category));
       return button;
     });
     // Avoid replacing a focused navigation item on every poll.
-    const signature = JSON.stringify([names, selected, snapshot.executors.map(e => e.executor_id), names.map(unreadCount)]);
+    const signature = JSON.stringify([names, selected, snapshot.executors.map(e => e.executor_id), names.map(unreadCount),
+      names.map(name => snapshot.executor_paseo?.[name]?.paseo_agent_id || null)]);
     if ($("executors").dataset.signature !== signature) {
       $("executors").replaceChildren(...nav); $("executors").dataset.signature = signature;
     }
@@ -401,6 +469,7 @@
       $(tab + "-tab").setAttribute("aria-selected", tab === category);
     }
     $("executor-title").textContent = selected || "暂无执行器";
+    renderPaseo();
     $("executor-meta").textContent = executor ? (executor.cwd || "") + "\n" + (executor.python || "") : selected ? "OFFLINE · 显示保留的历史记录" : "启动 executor 后即可查看运行状态";
     $("version").textContent = "Broker v" + snapshot.version;
     $("task-count").textContent = snapshot.tasks.filter(r => r.executor_id === selected).length;
@@ -431,6 +500,7 @@
       card.metadata.textContent = id + (record.pid ? " · PID " + record.pid : "") +
         (record.returncode !== undefined ? " · exit " + record.returncode : "") +
         (timestamps(record) ? "\n" + timestamps(record) : "") + (record.error ? "\n" + record.error : "");
+      if (record.notification) card.metadata.textContent += "\nPaseo：" + notificationText(record.notification);
       card.stop.disabled = card.controlling || failures > 0 || terminal.has(record.status) || ["cancelling", "stopping"].includes(record.status) || !executor;
     }
     const visibleIds = new Set(shown.map(r => r.task_id || r.service_id));
@@ -476,6 +546,25 @@
   $("login-form").addEventListener("submit", event => {
     event.preventDefault(); generation++; key = $("key").value; $("key").value = ""; failures = 0; retryAt = 0; message(""); refresh();
   });
+  $("paseo-toggle").addEventListener("click", () => {
+    const open = $("paseo-panel").hidden;
+    $("paseo-panel").hidden = !open;
+    $("paseo-toggle").setAttribute("aria-expanded", String(open));
+    if (open) $("paseo-agent").focus();
+  });
+  function closePaseo() {
+    const restoreFocus = $("paseo-panel").contains(document.activeElement);
+    $("paseo-panel").hidden = true;
+    $("paseo-toggle").setAttribute("aria-expanded", "false");
+    if (restoreFocus) $("paseo-toggle").focus();
+  }
+  document.addEventListener("click", event => {
+    if (!$("paseo-panel").hidden && !$("paseo-panel").contains(event.target) &&
+        !$("paseo-toggle").contains(event.target)) closePaseo();
+  });
+  $("paseo-form").addEventListener("submit", event => { event.preventDefault(); updatePaseo("save"); });
+  $("paseo-remove").addEventListener("click", () => updatePaseo("remove"));
+  $("paseo-test").addEventListener("click", () => updatePaseo("test"));
   $("clear-history").addEventListener("click", async () => {
     if (!selected || !snapshot || failures > 0 || snapshot.executors.some(item => item.executor_id === selected)) return;
     const target = selected;
@@ -497,7 +586,12 @@
     if (snapshot) render();
   });
   $("service-announcement").addEventListener("click", () => setNotificationsOpen(true));
-  document.addEventListener("keydown", event => { if (event.key === "Escape") setNotificationsOpen(false); });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      setNotificationsOpen(false);
+      if (!$("paseo-panel").hidden) closePaseo();
+    }
+  });
   for (const kind of ["tasks", "services"]) $(kind + "-tab").addEventListener("click", () => {
     if (snapshot) switchView(selected, kind);
   });

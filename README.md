@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.43
+# broker v0.1.50
 ```
 
 ## Start the broker
@@ -62,6 +62,40 @@ Automatically restoring an open card after refresh/navigation never clears unrea
 Initial history is quiet; unread state survives refresh within the tab session.
 Background tabs catch up on return. Tasks never trigger reminders; no desktop
 notification permission or sound is used.
+
+Select an executor and open **Paseo 通知** to save its default completion-notification
+target using only the Agent ID. Web bindings use the central Broker's default Paseo. The binding is stored in
+`broker.executor_paseo` in the broker's selected YAML configuration and survives
+restarts. New `start_service` calls automatically inherit this target; there is
+no per-call `paseo` parameter. Existing services keep
+their original binding. Unbound executors retain the polling flow. A shared
+executor notifies the same default Agent regardless of which client starts the
+service. The start response includes the resolved target when notifications are enabled.
+
+Bound executors show **已绑定** in the sidebar; hover over the badge to see the
+Agent ID. Use **发送测试消息** to submit a test to the saved target, then confirm
+receipt in that Agent's conversation; submission alone is not proof of delivery. **解除绑定**
+removes the default for future services. Bindings can also be edited while an
+executor is offline. Embedders using `create_broker` must supply `config_path`
+and the loaded `executor_paseo` mapping to enable persistent web editing.
+Click outside the Paseo settings panel or press Escape to close it; unsaved input
+is preserved while the same executor remains selected.
+
+Completion notifications and test messages are queued per Paseo Agent. Broker
+waits for `paseo wait` to report `idle`, then sends using `--no-wait`. Busy agents
+and agents waiting for permission remain pending; different agents progress
+independently. The UI shows queued, waiting for idle, sending, submitted or failed
+states. `submitted` means Paseo accepted the send, not confirmed receipt.
+This is a best-effort idle check: a new turn can begin between the wait and send
+calls. Queues are memory-only and pending messages do not survive a Broker restart.
+Up to 256 active/pending messages are accepted; overflow is recorded as failed.
+Daemon/CLI errors are recorded as failures without automatic replay.
+
+To get the Agent ID, right-click the target Agent's tab in Paseo, choose
+**Copy Agent ID** (复制 Agent ID), and paste it into the binding form.
+
+Use the full Paseo Agent ID, not the native Codex session ID. Existing API
+bindings with `paseo_server_id` and `paseo_host` remain accepted for compatibility.
 
 ## Start an executor
 
@@ -133,10 +167,10 @@ During execution:
 - For incremental reads, pass the previous `next_cursor` as `cursor`.
 - Use `cancel_task` to cancel commands.
 - Use `start_service` and the service management tools for long-running services.
-- `start_service` accepts an optional `paseo` binding (`paseo_server_id`,
-  `paseo_agent_id`, and optional `paseo_host`). When supplied, Broker sends a
-  completion prompt with the service result after `stopped` or `failed`, using
-  Paseo `--no-wait`. Without it, use the existing `get_service` polling flow.
+- Configure the executor's Paseo Agent binding in the Web UI. `start_service`
+  automatically uses the saved binding and accepts no `paseo` parameter. Broker
+  sends the result after `stopped` or `failed` using Paseo `--no-wait`.
+  Without a saved binding, use `get_service` polling.
   Paseo delivery is best-effort and never changes the service result.
 - If a task becomes `lost`, check its outcome and side effects before deciding whether to retry.
 

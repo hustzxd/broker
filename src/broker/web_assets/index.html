@@ -21,7 +21,22 @@
   <div id="dashboard" hidden>
     <aside><div class="sidebar-title">EXECUTORS <span id="executor-count">0</span></div><nav id="executors" aria-label="执行器"></nav><div class="environment"><button id="environment-toggle" aria-expanded="false" aria-controls="executor-meta">环境信息 ▸</button><p id="executor-meta" hidden></p></div><div class="sidebar-note"><span id="version"></span><br>日志仅保存在内存中<br>历史淘汰后将不再展示</div></aside>
     <main>
-      <div class="workspace-heading"><h1 id="executor-title">选择执行器</h1><div class="workspace-actions"><button id="clear-history" hidden>清除离线历史</button></div></div>
+      <div class="workspace-heading"><h1 id="executor-title">选择执行器</h1><div class="workspace-actions"><button id="paseo-toggle" aria-expanded="false" aria-controls="paseo-panel" hidden>Paseo 通知</button><button id="clear-history" hidden>清除离线历史</button></div></div>
+      <section id="paseo-panel" class="paseo-panel" hidden aria-label="Paseo 通知设置">
+        <h2>默认完成通知 · <span id="paseo-executor"></span></h2>
+        <p>只影响之后新建的服务。共享此 executor 的服务通知同一个 Agent；start_service 自动使用此绑定，无需传入通知参数。</p>
+        <p id="paseo-current"></p>
+        <form id="paseo-form">
+          <div class="paseo-fields">
+            <label for="paseo-agent">Agent ID<input id="paseo-agent" required autocomplete="off" spellcheck="false"></label>
+          </div>
+          <div class="paseo-actions"><button id="paseo-save" type="submit" class="primary">保存绑定</button><button id="paseo-test" type="button">发送测试消息</button><button id="paseo-remove" type="button">解除绑定</button></div>
+        </form>
+        <p id="paseo-feedback" role="status" aria-live="polite"></p>
+        <p id="paseo-test-status" role="status" aria-live="polite"></p>
+        <p>完成通知与测试消息先排队，等待 Agent 空闲后发送。队列仅存内存，Broker 重启后待发送消息会丢失。</p>
+        <div class="paseo-help"><strong>如何获取 Agent ID？</strong><p>在 Paseo 中，右键点击目标 Agent 的标签页，选择“复制 Agent ID”，然后粘贴到上方输入框。</p><p>通知使用中心 Broker 的默认 Paseo。请填写 Paseo Agent ID，不要使用 Codex session ID。</p></div>
+      </section>
       <div class="toolbar"><div class="tabs" role="tablist"><button id="tasks-tab" class="active" role="tab" aria-selected="true">Tasks <span id="task-count">0</span></button><button id="services-tab" role="tab" aria-selected="false">Services <span id="service-count">0</span><span id="service-unread" class="unread-badge" hidden></span></button></div><span class="live"><i></i> <span id="live-status">每秒刷新</span></span></div>
       <div class="filters"><input id="run-search" type="search" placeholder="搜索名称、命令或 ID" aria-label="搜索任务或服务"><select id="status-filter" aria-label="筛选状态"><option value="all">全部状态</option><option value="active">运行中</option><option value="queued">排队中</option><option value="finished">已结束</option><option value="failed">失败 / 丢失</option></select></div>
       <div id="runs"></div><div id="empty" class="empty">暂无任务。通过 MCP 向此 executor 提交命令后，将在这里显示。</div>
