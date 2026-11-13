@@ -14,43 +14,73 @@ def validate_target(target):
         return None
     if not isinstance(target, dict):
         raise ValueError("paseo must be an object")
-    required = ("paseo_server_id", "paseo_agent_id")
+    required = ("paseo_agent_id",)
     if any(not isinstance(target.get(key), str) or not target[key].strip() for key in required):
-        raise ValueError("paseo requires non-empty paseo_server_id and paseo_agent_id")
-    allowed = set(required) | {"paseo_host"}
+        raise ValueError("paseo requires a non-empty paseo_agent_id")
+    allowed = set(required) | {"paseo_host", "paseo_server_id"}
     if set(target) - allowed:
         raise ValueError(f"unknown paseo fields: {', '.join(sorted(set(target) - allowed))}")
     result = {key: target[key].strip() for key in required}
-    if "paseo_host" in target:
-        if not isinstance(target["paseo_host"], str) or not target["paseo_host"].strip():
-            raise ValueError("paseo_host must be a non-empty string")
-        result["paseo_host"] = target["paseo_host"].strip()
+    for key in ("paseo_host", "paseo_server_id"):
+        if key in target:
+            if not isinstance(target[key], str) or not target[key].strip():
+                raise ValueError(f"{key} must be a non-empty string")
+            result[key] = target[key].strip()
     return result
 
 
-async def send_completion(target, prompt, *, executable="paseo", timeout=DEFAULT_SEND_TIMEOUT):
+async def _run_cli(target, arguments, *, executable="paseo", timeout=DEFAULT_SEND_TIMEOUT):
     command = shutil.which(executable)
     if command is None:
         raise FileNotFoundError(f"Paseo CLI not found: {executable}")
     args = [command]
     if target.get("paseo_host"):
         args.extend(("--host", target["paseo_host"]))
-    args.extend(("send", target["paseo_agent_id"], "--prompt", prompt,
-                 "--behavior", "steer", "--no-wait", "--json"))
+    args.extend(arguments)
     process = await asyncio.create_subprocess_exec(
         *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
     except asyncio.TimeoutError as exc:
-        process.kill()
+        if process.returncode is None:
+            process.kill()
         await process.communicate()
-        raise TimeoutError(f"paseo send timed out after {timeout} seconds") from exc
+        raise TimeoutError(f"paseo {arguments[0]} timed out after {timeout} seconds") from exc
+    except asyncio.CancelledError:
+        if process.returncode is None:
+            process.kill()
+        await process.communicate()
+        raise
     if process.returncode:
-        detail = stderr.decode("utf-8", "replace").strip()
-        raise RuntimeError(detail or f"paseo send exited with {process.returncode}")
+        detail = stderr.decode("utf-8", "replace").strip() or stdout.decode("utf-8", "replace").strip()
+        raise RuntimeError(detail or f"paseo {arguments[0]} exited with {process.returncode}")
     result = stdout.decode("utf-8", "replace").strip()
-    return json.loads(result) if result else {"status": "submitted"}
+    if not result:
+        raise RuntimeError(f"paseo {arguments[0]} returned no receipt")
+    receipt = json.loads(result)
+    if not isinstance(receipt, dict) or receipt.get("error") or receipt.get("success") is False:
+        raise RuntimeError(f"paseo {arguments[0]} returned an error receipt")
+    return receipt
+
+
+async def wait_until_idle(target, *, executable="paseo"):
+    """Wait in bounded CLI calls so busy agents remain pending until idle."""
+    while True:
+        receipt = await _run_cli(target, ("wait", target["paseo_agent_id"], "--timeout", "30", "--json"),
+                                 executable=executable, timeout=45)
+        status = receipt.get("status")
+        if status == "idle":
+            return
+        if status not in {"timeout", "permission"}:
+            raise RuntimeError(f"Paseo agent is not available for notification: {status}")
+        await asyncio.sleep(2)
+
+
+async def send_completion(target, prompt, *, executable="paseo", timeout=DEFAULT_SEND_TIMEOUT):
+    return await _run_cli(target, ("send", target["paseo_agent_id"], "--prompt", prompt,
+                                  "--behavior", "steer", "--no-wait", "--json"),
+                          executable=executable, timeout=timeout)
 
 
 def completion_prompt(service, event_id):

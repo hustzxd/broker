@@ -38,6 +38,7 @@ class ServiceIdTests(unittest.IsolatedAsyncioTestCase):
         broker = ExecutionBroker()
         broker.executors["test"] = {"websocket": AsyncMock()}
         target = {"paseo_server_id": "srv", "paseo_agent_id": "agent"}
+        broker.executor_paseo["test"] = target
         with patch("broker.broker.request_id", side_effect=["111111", "222222"]), patch(
             "broker.broker.uuid.uuid4", side_effect=[
                 SimpleNamespace(hex="abcdef" + "0" * 26),
@@ -45,27 +46,29 @@ class ServiceIdTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(hex="123456" + "0" * 26),
             ],
         ):
-            first = await broker.start_service("test", "first", "exit 0", paseo=target)
-            second = await broker.start_service("test", "second", "exit 0", paseo=target)
+            first = await broker.start_service("test", "first", "exit 0")
+            second = await broker.start_service("test", "second", "exit 0")
         self.assertEqual(broker.get_service(first["service_id"])["notification"]["event_id"], "abcdef")
         self.assertEqual(broker.get_service(second["service_id"])["notification"]["event_id"], "123456")
 
 
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = task_tests.CancelTaskTests.asyncSetUp
+    async def asyncSetUp(self):
+        await task_tests.CancelTaskTests.asyncSetUp(self)
+        self.broker._paseo_waiter = AsyncMock()
     asyncTearDown = task_tests.CancelTaskTests.asyncTearDown
     wait_until = task_tests.CancelTaskTests.wait_until
 
     async def test_paseo_notification_is_optional_and_sent_on_terminal_state(self):
         sender = AsyncMock(return_value={"success": True, "deliveryStatus": "queued"})
         self.broker._paseo_sender = sender
+        self.broker.executor_paseo["test"] = {"paseo_server_id": "srv", "paseo_agent_id": "agent"}
         service = await self.broker.start_service(
             "test", "notified", "exit 0",
-            paseo={"paseo_server_id": "srv", "paseo_agent_id": "agent"},
         )
         service_id = service["service_id"]
         await self.wait_until(lambda: self.broker.get_service(service_id)["status"] == "stopped")
-        await self.wait_until(lambda: self.broker.get_service(service_id)["notification"]["status"] == "queued")
+        await self.wait_until(lambda: self.broker.get_service(service_id)["notification"]["status"] == "submitted")
         sender.assert_awaited_once()
         target, prompt = sender.await_args.args
         self.assertEqual(target, {"paseo_server_id": "srv", "paseo_agent_id": "agent"})
@@ -85,9 +88,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_paseo_failure_is_recorded_without_changing_service_result(self):
         self.broker._paseo_sender = AsyncMock(side_effect=OSError("daemon unavailable"))
+        self.broker.executor_paseo["test"] = {"paseo_agent_id": "agent"}
         service = await self.broker.start_service(
             "test", "notify-failure", "exit 3",
-            paseo={"paseo_server_id": "srv", "paseo_agent_id": "agent"},
         )
         service_id = service["service_id"]
         await self.wait_until(lambda: self.broker.get_service(service_id)["status"] == "failed")

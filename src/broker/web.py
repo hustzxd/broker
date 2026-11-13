@@ -81,7 +81,35 @@ def web_routes(broker):
             "executors": broker.list_executors(),
             "tasks": broker.list_tasks(include_completed=True),
             "services": broker.list_services(include_inactive=True),
+            "executor_paseo": broker.executor_paseo,
+            "paseo_tests": broker.paseo_tests,
         }, headers=HEADERS)
+
+    async def executor_paseo(request):
+        if cross_origin(request):
+            return JSONResponse({"error": "Cross-origin controls are not allowed"}, status_code=403, headers=HEADERS)
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 8192:
+                return JSONResponse({"error": "Request too large"}, status_code=413, headers=HEADERS)
+        try:
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                raise ValueError("Expected an object")
+            executor_id = data.get("executor_id")
+            broker._validate_binding_executor(executor_id)
+            if request.url.path.endswith("/test"):
+                notification = broker.enqueue_paseo_test(executor_id)
+                return JSONResponse(notification, status_code=202, headers=HEADERS)
+            if "paseo" not in data:
+                raise ValueError("paseo is required; use null to remove a binding")
+            binding = broker.set_executor_paseo(executor_id, data["paseo"])
+            return JSONResponse({"executor_id": executor_id, "paseo": binding}, headers=HEADERS)
+        except ValueError as error:
+            return JSONResponse({"error": str(error)}, status_code=400, headers=HEADERS)
+        except (OSError, RuntimeError):
+            return JSONResponse({"error": "Could not save binding or contact Paseo; check the broker configuration and daemon connection"}, status_code=503, headers=HEADERS)
 
     async def logs(request):
         nonlocal cache_bytes
@@ -140,6 +168,8 @@ def web_routes(broker):
         Route("/ui/app.js", asset), Route("/ui/style.css", asset),
         Route("/ui/favicon.svg", asset),
         Route("/ui/api/state", state),
+        Route("/ui/api/executor-paseo", executor_paseo, methods=["POST"]),
+        Route("/ui/api/executor-paseo/test", executor_paseo, methods=["POST"]),
         Route("/ui/api/history/clear", clear_history, methods=["POST"]),
         Route("/ui/api/{kind}/{run_id}/logs", logs),
         Route("/ui/api/{kind}/{run_id}/stop", control, methods=["POST"]),

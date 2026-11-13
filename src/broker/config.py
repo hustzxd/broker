@@ -97,3 +97,23 @@ def load_config(path=DEFAULT_CONFIG_PATH):
 def int_value(section, name, default):
     value = section.get(name)
     return default if value is None else int(value)
+
+
+def save_executor_paseo(path, bindings):
+    """Atomically update notification defaults without replacing other settings."""
+    path = os.path.expanduser(path)
+    if os.path.islink(path):
+        raise ValueError("Cannot update a symbolic-link configuration file")
+    with open(path, encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file) or {}
+    config.setdefault("broker", {})["executor_paseo"] = bindings
+    descriptor, temporary_path = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as config_file:
+            yaml.safe_dump(config, config_file, sort_keys=False)
+            config_file.flush()
+            os.fsync(config_file.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
