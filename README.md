@@ -17,14 +17,14 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.50
+# broker v0.1.51
 ```
 
 ## Start the broker
 
 ```bash
-broker                     # TUI dashboard, grouped by executor
-broker --output-mode raw   # Plain logs for background operation
+broker                     # Plain logs; dashboard at /ui/
+broker --output-mode tui   # Optional terminal dashboard
 ```
 
 The first run creates `~/.broker/config.yaml` with a random `broker.key`. The default directory has mode `700`, and the config file has mode `600`. Existing keys are preserved.
@@ -117,7 +117,7 @@ executor:
 
 Or override the address with `--broker-url ws://broker-host:8272`. Key lookup order is `BROKER_KEY`, `executor.key`, then local `broker.key`; a remote machine's generated key does not match the central key automatically.
 
-Both broker and executor default to TUI. Executors also support `--output-mode raw` and `--output-mode prefixed`. Use raw mode for redirected output. CLI options override YAML; place `--config /path/to/config.yaml` before the `executor` subcommand.
+Both broker and executor default to raw logs. Use the Web UI for the dashboard, or select `--output-mode tui` explicitly for a terminal dashboard. Executors also support `--output-mode prefixed`. Existing YAML settings remain effective; change `output_mode: tui` to `raw` to update an older configuration. CLI options override YAML; place `--config /path/to/config.yaml` before the `executor` subcommand.
 
 ## Connect Codex
 
@@ -229,7 +229,7 @@ Optional broker settings in `config.yaml`:
 
 ```yaml
 broker:
-  output_mode: tui
+  output_mode: raw
   max_log_bytes: 1048576
   max_completed_tasks: 100
   max_completed_services: 100

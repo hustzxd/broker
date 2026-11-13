@@ -178,7 +178,7 @@ class OutputModeConfigTests(unittest.TestCase):
     def test_default_config_and_cli_override(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
             config = Path(directory) / "config.yaml"
-            for configured, expected in (("executor:\n  output_mode: raw\n", "raw"), ("executor:\n  output_mode: prefixed\n", "prefixed")):
+            for configured, expected in (("", "raw"), ("executor:\n  output_mode: raw\n", "raw"), ("executor:\n  output_mode: prefixed\n", "prefixed")):
                 config.write_text("broker:\n  key: test-key\n" + configured)
                 arguments = ["--config", str(config), "executor", "--executor-id", "test", "--broker-url", "ws://test"]
                 with patch("broker.cli.run_executor", AsyncMock()) as run:

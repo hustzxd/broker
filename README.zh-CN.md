@@ -17,14 +17,14 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.50
+# broker v0.1.51
 ```
 
 ## 启动中心 Broker
 
 ```bash
-broker                     # TUI 总览，按 executor 分页
-broker --output-mode raw   # 普通日志，适合后台运行
+broker                     # 默认普通日志，通过 /ui/ 查看网页
+broker --output-mode tui   # 可选终端仪表盘
 ```
 
 首次运行创建 `~/.broker/config.yaml`，并随机生成 `broker.key`。默认目录权限为 `700`，配置文件为 `600`，已有 Key 保留。
@@ -76,7 +76,7 @@ executor:
 
 地址也可通过 `--broker-url ws://broker-host:8272` 覆盖。Key 读取顺序为 `BROKER_KEY`、`executor.key`、本机 `broker.key`；远程机器自动生成的 Key 不会与中心 Key 自动匹配。
 
-Broker 和 executor 默认使用 TUI。Executor 另支持 `--output-mode raw` 和 `--output-mode prefixed`，重定向输出时使用 raw。命令行优先于 YAML；自定义配置参数 `--config /path/to/config.yaml` 放在 `executor` 子命令之前。
+Broker 和 executor 默认使用 raw 普通日志，通过 Web UI 查看仪表盘；需要终端界面时显式使用 `--output-mode tui`。Executor 另支持 `--output-mode prefixed`。已有 YAML 设置继续生效，旧配置如需切换请将 `output_mode: tui` 改为 `raw`。命令行优先于 YAML；自定义配置参数 `--config /path/to/config.yaml` 放在 `executor` 子命令之前。
 
 ## 接入 Codex
 
@@ -184,7 +184,7 @@ start_service(executor_id="demo", name="tensorboard",
 
 ```yaml
 broker:
-  output_mode: tui
+  output_mode: raw
   max_log_bytes: 1048576
   max_completed_tasks: 100
   max_completed_services: 100
