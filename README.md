@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.38
+# broker v0.1.43
 ```
 
 ## Start the broker
@@ -133,6 +133,11 @@ During execution:
 - For incremental reads, pass the previous `next_cursor` as `cursor`.
 - Use `cancel_task` to cancel commands.
 - Use `start_service` and the service management tools for long-running services.
+- `start_service` accepts an optional `paseo` binding (`paseo_server_id`,
+  `paseo_agent_id`, and optional `paseo_host`). When supplied, Broker sends a
+  completion prompt with the service result after `stopped` or `failed`, using
+  Paseo `--no-wait`. Without it, use the existing `get_service` polling flow.
+  Paseo delivery is best-effort and never changes the service result.
 - If a task becomes `lost`, check its outcome and side effects before deciding whether to retry.
 
 ### Use local tools
@@ -163,6 +168,11 @@ Follow explicit user instructions about execution location and tools. Report the
 | `stop_service(service_id)` | Stop the process group; force termination after 5 seconds |
 
 Commands run serially per executor. An `execute` timeout ends only the wait; use `get_task` to poll or `cancel_task` to stop it. Pass the previous `next_cursor` as `cursor` to read only new output; `truncated` reports omitted output. Service log responses contain `logs`, `truncated` and `next_cursor`.
+
+New service IDs contain six hexadecimal characters (for example, `c6a388`).
+Collisions with retained services are retried; existing longer IDs remain valid.
+Notification event IDs also contain six hexadecimal characters; collisions with
+events attached to retained services are retried.
 
 Example service with a TCP readiness check:
 
