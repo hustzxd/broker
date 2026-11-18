@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.51
+# broker v0.1.53
 ```
 
 ## 启动中心 Broker
@@ -39,7 +39,7 @@ Web UI 随 broker 一起启动，共用 HTTP 端口。中心 TUI 提供完整的
 
 Web 页面会在标签页会话中保留 executor/分类选择、卡片展开、跟随模式、搜索筛选和滚动位置。记录按最新提交排序，可按状态筛选或搜索名称、命令和 ID；日志支持关键词筛选匹配行、复制与下载 `.txt`，复制/下载包含已加载的完整保留文本，不仅是匹配行。暂停跟随可固定当前快照。后台标签页暂停轮询，连接失败时显示最后更新时间和最长 30 秒的退避重试倒计时。离线历史可确认后清除，在线和活跃记录受保护；服务端渲染日志使用限量缓存，不新增日志文件。
 
-顶部主题按钮可切换深色/浅色，浏览器会记住主题偏好，不影响登录状态。
+顶部主题按钮可切换深色/浅色，浏览器会记住主题偏好，不影响登录状态。顶部 **GitHub** 链接在新标签页打开 Broker 仓库，登录前后均可使用。
 
 Service 结束或失败时提供页面内提醒，顶部、executor 侧栏和 Services 页签显示未读数。点击提醒可定位并展开服务，主动展开详情标为已读，也可点击“标为已读”或“全部已读”；刷新/切换视图时自动恢复展开状态不会清除未读。首次加载不提醒已有历史；未读状态在当前标签页会话中保存，刷新不重复弹提醒，后台标签页返回后同步。Task 不提醒，不申请桌面通知权限或播放声音。
 
@@ -97,6 +97,52 @@ http_headers = { Authorization = "Bearer <中心 broker.key>" }
 ```
 
 Codex 自动携带 Key，工具参数无需包含凭证，也不需要 OAuth 登录。参见 [Codex MCP 文档](https://developers.openai.com/codex/mcp/)。
+
+## 接入 Claude Code
+
+先安装 Claude Code，并确保它能访问正在运行的 broker。在终端中添加 HTTP MCP 服务：
+
+```bash
+claude mcp add --transport http --scope user broker "http://<BROKER_HOST>:<PORT>/mcp" \
+  --header "Authorization: Bearer <TOKEN>"
+```
+
+实际执行前，替换 `<BROKER_HOST>`、`<PORT>` 和 `<TOKEN>`。MCP URL 来自 broker 部署配置，Token 使用中心 broker 所选配置文件中的 `broker.key`（默认 `~/.broker/config.yaml`）；若设置了 `BROKER_KEY`，则使用该覆盖值。远程访问请使用部署提供的 HTTPS URL 或加密隧道，参见[诊断与安全](#诊断与安全)。
+
+通过 `--scope` 选择配置范围：
+
+| 范围 | 生效范围 |
+|---|---|
+| `user` | 当前用户的所有项目 |
+| `project` | 项目共享配置，写入 `.mcp.json`；在项目目录中执行添加命令 |
+| `local`（省略时默认） | 仅当前用户的当前项目 |
+
+不要将真实 Token 提交到共享配置。使用 project 范围时，在 `.mcp.json` 中引用环境变量，替代真实 Token：
+
+```json
+{
+  "mcpServers": {
+    "broker": {
+      "type": "http",
+      "url": "http://<BROKER_HOST>:<PORT>/mcp",
+      "headers": { "Authorization": "Bearer ${BROKER_KEY}" }
+    }
+  }
+}
+```
+
+替换 URL 占位符，并沿用上文的环境变量方式，由每位用户在**启动 Claude Code 前**安全设置 `BROKER_KEY`。含凭据的文件保持私有，权限设为 `600`。首次使用项目级 MCP 服务时，Claude Code 可能要求确认授权。
+
+在终端中验证配置和连接：
+
+```bash
+claude mcp list
+claude mcp get broker
+```
+
+添加后，在 Claude Code 会话内运行 `/mcp`，检查 `broker` 是否已连接。如果当前会话尚未加载新服务，退出并重新启动 Claude Code 会话，再用 `/mcp` 检查即可，无需重启电脑。
+
+保持 broker 和至少一个 executor 运行，即可使用上文的示例请求。Claude Code 自动携带 Bearer Token，不需要 OAuth 登录。参见 [Claude Code MCP 文档](https://code.claude.com/docs/en/mcp)。
 
 ## Harness 提示词
 

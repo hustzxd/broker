@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.51
+# broker v0.1.53
 ```
 
 ## Start the broker
@@ -53,7 +53,7 @@ retry countdown with backoff up to 30 seconds. Offline history can be cleared
 after confirmation; online or active records are protected. Server-side rendered
 logs use a bounded cache. No server log files are created.
 
-Use the header theme switch for dark/light mode; the browser remembers this preference independently of login.
+Use the header theme switch for dark/light mode; the browser remembers this preference independently of login. The **GitHub** link in the header opens the Broker repository in a new tab and is available before and after login.
 
 Service completion/failure produces in-page reminders and unread counts in the
 header, executor sidebar and Services tab. Click a reminder to open its service;
@@ -138,6 +138,52 @@ Use broker to run ls on the demo executor and return the result.
 ```
 
 Codex sends the key automatically; tool arguments do not include it. No OAuth login is needed. See [Codex MCP documentation](https://developers.openai.com/codex/mcp/).
+
+## Connect Claude Code
+
+Install Claude Code and make sure it can reach the running broker. In a terminal, add the HTTP MCP server:
+
+```bash
+claude mcp add --transport http --scope user broker "http://<BROKER_HOST>:<PORT>/mcp" \
+  --header "Authorization: Bearer <TOKEN>"
+```
+
+Replace `<BROKER_HOST>`, `<PORT>` and `<TOKEN>` before running the command. Use the MCP URL from your broker deployment and its central `broker.key` from the selected configuration (default `~/.broker/config.yaml`), or the `BROKER_KEY` override if set. Use your deployment's HTTPS URL or an encrypted tunnel for remote access, as described under [Diagnostics and security](#diagnostics-and-security).
+
+Choose the configuration scope with `--scope`:
+
+| Scope | Availability |
+|---|---|
+| `user` | Current user, across all projects |
+| `project` | Shared project configuration in `.mcp.json`; run the command from the project directory |
+| `local` (default when omitted) | Current user, in the current project only |
+
+Do not commit a real token in shared configuration. For project scope, use an environment variable reference in `.mcp.json` instead of the literal token:
+
+```json
+{
+  "mcpServers": {
+    "broker": {
+      "type": "http",
+      "url": "http://<BROKER_HOST>:<PORT>/mcp",
+      "headers": { "Authorization": "Bearer ${BROKER_KEY}" }
+    }
+  }
+}
+```
+
+Replace the URL placeholders and set `BROKER_KEY` securely in each user's environment **before starting Claude Code**, following the environment-variable approach above. Keep credential files private with mode `600`. Claude Code may ask you to approve a project-scoped server on first use.
+
+Verify the configuration and connection in a terminal:
+
+```bash
+claude mcp list
+claude mcp get broker
+```
+
+After adding the server, run `/mcp` inside the Claude Code session to check that `broker` is connected. If the current session has not loaded it, exit and start a new Claude Code session, then check `/mcp` again. No computer restart is needed.
+
+Keep the broker and at least one executor running, then use the same example request as above. Claude Code sends the Bearer token automatically; no OAuth login is needed. See [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
 
 ## Harness prompt
 

@@ -9,7 +9,7 @@
   <script src="/ui/app.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="/ui/">B<span>Broker</span></a><span id="connection" role="status">等待连接</span><span id="last-update"></span><div class="header-actions"><button id="notifications-toggle" hidden aria-expanded="false" aria-controls="notifications">服务提醒 <span id="unread-total">0</span></button><button id="theme-toggle" aria-label="切换到浅色主题" aria-pressed="false">浅色主题</button></div></header>
+  <header><a class="brand" href="/ui/">B<span>Broker</span></a><span id="connection" role="status">等待连接</span><span id="last-update"></span><div class="header-actions"><a class="github-link" href="https://github.com/hustzxd/broker" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库（新标签页打开）">GitHub</a><button id="notifications-toggle" hidden aria-expanded="false" aria-controls="notifications">服务提醒 <span id="unread-total">0</span></button><button id="theme-toggle" aria-label="切换到浅色主题" aria-pressed="false">浅色主题</button></div></header>
   <section id="notifications" hidden aria-label="服务提醒"><div class="notification-heading"><strong>服务提醒</strong><button id="read-all">全部已读</button><button id="notifications-close" aria-label="关闭服务提醒">关闭</button></div><p id="notification-empty">暂无未读服务提醒</p><div id="notification-list"></div></section>
   <button id="service-announcement" aria-live="polite" hidden></button>
   <section id="login" class="login">
