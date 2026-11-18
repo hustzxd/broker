@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.53
+# broker v0.1.55
 ```
 
 ## 启动中心 Broker
@@ -40,6 +40,8 @@ Web UI 随 broker 一起启动，共用 HTTP 端口。中心 TUI 提供完整的
 Web 页面会在标签页会话中保留 executor/分类选择、卡片展开、跟随模式、搜索筛选和滚动位置。记录按最新提交排序，可按状态筛选或搜索名称、命令和 ID；日志支持关键词筛选匹配行、复制与下载 `.txt`，复制/下载包含已加载的完整保留文本，不仅是匹配行。暂停跟随可固定当前快照。后台标签页暂停轮询，连接失败时显示最后更新时间和最长 30 秒的退避重试倒计时。离线历史可确认后清除，在线和活跃记录受保护；服务端渲染日志使用限量缓存，不新增日志文件。
 
 顶部主题按钮可切换深色/浅色，浏览器会记住主题偏好，不影响登录状态。顶部 **GitHub** 链接在新标签页打开 Broker 仓库，登录前后均可使用。
+
+登录后点击顶部 **配置**，可编辑当前 Broker 所选的 `config.yaml`：中心监听地址、端口、输出模式、日志/历史/队列上限，以及本机 executor 的连接 URL、可选端口覆盖和输出模式。已有 Key 不回传浏览器，密码框留空保持原值，也可填写新值。保存时校验字段，以 `600` 权限原子写入文件，保留 Paseo 绑定和其他字段；文件在加载后被修改时，需要先重新加载再保存。YAML 格式和注释不保留。修改后需重启对应 Broker 或本机 executor 生效，命令行参数和 `BROKER_KEY` 仍优先；更换 Key 时同步更新客户端/executor 凭据。此面板不修改远程 executor 的文件，也不自动重启进程。Paseo 绑定继续通过原面板即时生效。嵌入运行的 Broker 需提供 `config_path` 才能编辑。
 
 Service 结束或失败时提供页面内提醒，顶部、executor 侧栏和 Services 页签显示未读数。点击提醒可定位并展开服务，主动展开详情标为已读，也可点击“标为已读”或“全部已读”；刷新/切换视图时自动恢复展开状态不会清除未读。首次加载不提醒已有历史；未读状态在当前标签页会话中保存，刷新不重复弹提醒，后台标签页返回后同步。Task 不提醒，不申请桌面通知权限或播放声音。
 
@@ -79,6 +81,8 @@ executor:
 Broker 和 executor 默认使用 raw 普通日志，通过 Web UI 查看仪表盘；需要终端界面时显式使用 `--output-mode tui`。Executor 另支持 `--output-mode prefixed`。已有 YAML 设置继续生效，旧配置如需切换请将 `output_mode: tui` 改为 `raw`。命令行优先于 YAML；自定义配置参数 `--config /path/to/config.yaml` 放在 `executor` 子命令之前。
 
 ## 接入 Codex
+
+登录 Web UI 后，点击顶部 **接入客户端**，可生成并复制 Codex 配置或 Claude Code 添加命令。MCP URL 默认使用当前站点的 `/mcp`，也可改为代理或隧道地址。浏览器生成配置后，请在运行客户端的机器上应用。默认使用 `BROKER_KEY` 环境变量，私有配置可显式选择包含当前登录 Key；关闭面板或认证失效时会清除此选择和预览中的 Key。Claude Code 的 project 范围始终通过 `add-json` 将 `${BROKER_KEY}` 引用写入 `.mcp.json`，避免真实 Key 进入共享配置。浏览器无法自动复制时，会选中文本供手动复制。
 
 在 `~/.codex/config.toml` 中添加，填写中心 broker 的 Key：
 

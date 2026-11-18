@@ -11,7 +11,14 @@ function setup(saved = {}, preferences = {}, storageBlocked = false, initialStat
     url: "http://localhost/ui/", runScripts: "outside-only", pretendToBeVisual: true,
   });
   const w = dom.window, d = w.document;
+  w.HTMLDialogElement.prototype.showModal = function () {this.open = true;};
+  w.HTMLDialogElement.prototype.close = function () {this.open = false; this.dispatchEvent(new w.Event("close"));};
   const env = {dom, w, d, calls: [], now: 10000, offline: false, confirmed: false, logs: "one\ntwo", revision: 1};
+  env.config = {path: "/example/.broker/config.yaml", revision: "revision-1", values: {
+    broker: {mcp_host: "127.0.0.1", mcp_port: 8273, executor_host: "127.0.0.1", executor_port: 8272,
+      output_mode: "raw", max_log_bytes: 1048576, max_completed_tasks: 100, max_completed_services: 100, max_pending_tasks: 32},
+    executor: {broker_url: "ws://127.0.0.1:8272", broker_port: null, output_mode: "raw"},
+  }, key_configured: {broker: true, executor: false}, environment_key_override: false};
   env.state = {
     version: "test", executors: [{executor_id: "a"}, {executor_id: "b"}],
     tasks: [
@@ -37,7 +44,20 @@ function setup(saved = {}, preferences = {}, storageBlocked = false, initialStat
     if (env.offline) throw Error("offline");
     if (env.unauthorized || options.headers.Authorization !== "Bearer key") return {ok: false, status: 401};
     let data;
-    if (url.endsWith("state")) data = structuredClone(env.state);
+    if (url.endsWith("config")) {
+      if (options.method === "POST") {
+        if (env.configConflict) return {ok:false, status:409, json:async()=>({error:"Configuration changed; reload it before saving"})};
+        const body = JSON.parse(options.body); env.configSaved = body;
+        for (const section of ["broker", "executor"]) {
+          for (const [name, value] of Object.entries(body.values[section])) {
+            if (name !== "key") env.config.values[section][name] = value;
+          }
+        }
+        env.config.revision = "revision-2";
+      }
+      data = structuredClone(env.config);
+    }
+    else if (url.endsWith("state")) data = structuredClone(env.state);
     else if (url.includes("/logs")) data = url.endsWith("revision=" + env.revision) ? {unchanged: true} :
       {text: env.logs, revision: String(env.revision), truncated: false};
     else if (url.endsWith("history/clear")) {
@@ -350,6 +370,98 @@ async function paseoBindings() {
   } finally {w.close();}
 }
 
+async function brokerConfiguration() {
+  const env = setup(), {w, d} = env;
+  const get = id => d.getElementById(id);
+  try {
+    assert(get("broker-config-toggle").hidden);
+    await env.login();
+    get("broker-config-toggle").click(); await settle();
+    assert(get("broker-config").open);
+    assert.equal(get("config-broker-mcp_port").value, "8273");
+    assert.equal(get("config-broker-key").value, "");
+    get("config-broker-mcp_port").value = "9000";
+    get("config-executor-broker_port").value = "";
+    get("broker-config-form").dispatchEvent(new w.Event("submit", {cancelable:true})); await settle();
+    assert.equal(env.configSaved.values.broker.mcp_port, 9000);
+    assert.equal(env.configSaved.values.executor.broker_port, null);
+    assert(!("key" in env.configSaved.values.broker));
+    assert.match(get("broker-config-feedback").textContent, /已保存.*重启/);
+    get("config-broker-key").value = "replacement";
+    env.configConflict = true;
+    get("broker-config-form").dispatchEvent(new w.Event("submit", {cancelable:true})); await settle();
+    assert.match(get("broker-config-feedback").textContent, /Configuration changed/);
+    assert.equal(get("config-broker-key").value, "replacement");
+    assert.equal(d.activeElement, get("broker-config-feedback"));
+    get("broker-config-close").click();
+    assert.equal(get("config-broker-key").value, "");
+    assert.equal(d.activeElement, get("broker-config-toggle"));
+    get("broker-config-toggle").click(); await settle();
+    get("config-executor-key").value = "another-key";
+    env.unauthorized = true; await env.tick(); await settle();
+    assert(!get("broker-config").open);
+    assert(get("broker-config-toggle").hidden);
+    assert.equal(get("config-executor-key").value, "");
+  } finally {w.close();}
+}
+
+async function clientSetup() {
+  const env = setup(), {w, d} = env;
+  const get = id => d.getElementById(id);
+  const change = (id, value) => {
+    get(id).value = value;
+    get(id).dispatchEvent(new w.Event(id === "client-mcp-url" ? "input" : "change"));
+  };
+  try {
+    assert.equal(get("client-setup-toggle").hidden, true);
+    await env.login();
+    assert.equal(get("client-setup-toggle").hidden, false);
+    get("client-setup-toggle").click();
+    assert(get("client-setup").open);
+    assert.equal(get("client-mcp-url").value, "http://localhost/mcp");
+    assert.match(get("client-config").value, /bearer_token_env_var = "BROKER_KEY"/);
+    get("client-include-key").click();
+    assert.match(get("client-config").value, /Authorization = "Bearer key"/);
+    get("client-copy").click(); await settle();
+    assert.equal(env.copied, get("client-config").value);
+    get("client-setup-close").click();
+    assert(!get("client-config").value.includes("Bearer key"));
+    assert.equal(d.activeElement, get("client-setup-toggle"));
+    get("client-setup-toggle").click();
+    change("client-kind", "claude");
+    assert.match(get("client-config").value, /--scope user/);
+    assert.match(get("client-config").value, /\$\{BROKER_KEY:\?/);
+    change("client-scope", "local");
+    assert.match(get("client-config").value, /--scope local/);
+    get("client-include-key").click();
+    change("client-scope", "project");
+    assert(get("client-include-key").disabled);
+    assert(!get("client-include-key").checked);
+    assert.match(get("client-config").value, /add-json --scope project/);
+    assert.match(get("client-config").value, /Bearer \$\{BROKER_KEY\}/);
+    assert(!get("client-config").value.includes("Bearer key"));
+    change("client-mcp-url", "javascript:alert(1)");
+    assert.equal(get("client-config").value, "");
+    assert(get("client-copy").disabled);
+    assert.equal(get("client-mcp-url").getAttribute("aria-invalid"), "true");
+    change("client-mcp-url", "https://user:secret@example.com/mcp");
+    assert(get("client-copy").disabled);
+    change("client-mcp-url", "https://broker.example.com/a'b/mcp?x=$(bad)");
+    assert(!get("client-copy").disabled);
+    assert.match(get("client-config").value, /'"'"'/);
+    w.navigator.clipboard.writeText = async () => {throw Error("Clipboard unavailable");};
+    get("client-copy").click(); await settle();
+    assert.equal(get("client-config").selectionEnd, get("client-config").value.length);
+    assert.match(get("client-setup-feedback").textContent, /已选中/);
+    change("client-scope", "user"); get("client-include-key").click();
+    assert.match(get("client-config").value, /Bearer key/);
+    env.unauthorized = true; await env.tick(); await settle();
+    assert(!get("client-setup").open);
+    assert(get("client-setup-toggle").hidden);
+    assert(!get("client-config").value.includes("Bearer key"));
+  } finally {w.close();}
+}
+
 (async () => {
   await viewAndLogs();
   await reconnectAndCleanup();
@@ -358,5 +470,7 @@ async function paseoBindings() {
   await serviceNotificationsAfterBackgroundReload();
   await operationIcons();
   await paseoBindings();
-  console.log("Web UI regression passed: restore, logs, filters, reconnect, offline cleanup, themes and service notifications.");
+  await clientSetup();
+  await brokerConfiguration();
+  console.log("Web UI regression passed: restore, logs, filters, reconnect, offline cleanup, themes, service notifications and MCP client setup.");
 })().catch(error => {console.error(error); process.exitCode = 1;});

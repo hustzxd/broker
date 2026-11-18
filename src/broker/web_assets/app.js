@@ -27,6 +27,188 @@
   let key = "", generation = 0, selected = null, category = "tasks", snapshot = null;
   let polling = false, cards = new Map();
   let paseoEditing = null, paseoBusy = false;
+  const clientSetup = $("client-setup");
+  $("client-mcp-url").value = new URL("/mcp", location.origin).href;
+  const shellQuote = value => "'" + value.replace(/'/g, "'\"'\"'") + "'";
+  function renderClientSetup() {
+    const claude = $("client-kind").value === "claude";
+    const scope = $("client-scope").value;
+    const shared = claude && scope === "project";
+    if (shared) $("client-include-key").checked = false;
+    $("client-include-key").disabled = shared;
+    $("client-scope-field").hidden = !claude;
+    $("client-setup-feedback").textContent = "";
+    $("client-mcp-url").removeAttribute("aria-invalid");
+    let url;
+    try {
+      const value = $("client-mcp-url").value.trim();
+      if (/[\s\x00-\x1f\x7f]/.test(value)) throw new Error();
+      url = new URL(value);
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash) throw new Error();
+    } catch {
+      $("client-config").value = "";
+      $("client-copy").disabled = true;
+      $("client-mcp-url").setAttribute("aria-invalid", "true");
+      $("client-setup-feedback").textContent = "请填写完整的 HTTP/HTTPS MCP 地址，不含用户名、密码或片段。";
+      return;
+    }
+    $("client-copy").disabled = false;
+    const includeKey = $("client-include-key").checked && Boolean(key);
+    if (claude) {
+      const header = includeKey ? shellQuote("Authorization: Bearer " + key) : '"Authorization: Bearer ${BROKER_KEY:?请先设置 BROKER_KEY}"';
+      $("client-config").value = "claude mcp add --transport http --scope " + scope + " broker " + shellQuote(url.href) + " \\\n  --header " + header;
+      if (shared) $("client-config").value = "claude mcp add-json --scope project broker " + shellQuote(JSON.stringify({
+        type: "http", url: url.href, headers: {Authorization: "Bearer ${BROKER_KEY}"},
+      }));
+      $("client-instructions").textContent = shared ?
+        "在项目目录执行。project 使用 add-json 将环境变量引用写入共享 .mcp.json，不写入真实 Key；每位用户需在启动 Claude Code 前设置 BROKER_KEY。首次使用可能要求批准项目级 MCP 服务。" :
+        "在终端执行添加命令。user 对当前用户所有项目生效；local 仅用于当前用户当前项目。";
+      $("client-verify").textContent = "验证：终端运行 claude mcp list / claude mcp get broker；会话内运行 /mcp 检查连接。如果当前会话尚未加载，再退出并重新启动 Claude Code 会话，无需重启电脑。";
+    } else {
+      const auth = includeKey ? "http_headers = { Authorization = " + JSON.stringify("Bearer " + key) + " }" : 'bearer_token_env_var = "BROKER_KEY"';
+      $("client-config").value = '[mcp_servers.broker]\nurl = ' + JSON.stringify(url.href) + "\n" + auth;
+      $("client-instructions").textContent = "将配置合并到 ~/.codex/config.toml；如果已有 [mcp_servers.broker]，请更新该段，避免重复。含凭据的文件权限设为 600。";
+      $("client-verify").textContent = "验证：运行 codex mcp list；在 Codex 会话内检查 MCP 连接，必要时重新连接 MCP 或重新启动 Codex。保持 Broker 和至少一个 executor 运行。";
+    }
+  }
+  function clearClientSecret() {
+    $("client-include-key").checked = false;
+    renderClientSetup();
+  }
+  $("client-setup-toggle").addEventListener("click", () => {
+    clearClientSecret(); clientSetup.showModal(); $("client-mcp-url").focus();
+  });
+  $("client-setup-close").addEventListener("click", () => clientSetup.close());
+  clientSetup.addEventListener("close", () => { clearClientSecret(); $("client-setup-toggle").focus(); });
+  clientSetup.addEventListener("cancel", clearClientSecret);
+  function trapDialogFocus(event) {
+    if (event.key !== "Tab") return;
+    const controls = [...event.currentTarget.querySelectorAll("button, input, select, textarea")]
+      .filter(node => !node.matches(":disabled") && !node.closest("[hidden]"));
+    if (!controls.length) return;
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault(); first.focus();
+    }
+  }
+  clientSetup.addEventListener("keydown", trapDialogFocus);
+  for (const id of ["client-mcp-url", "client-kind", "client-scope", "client-include-key"]) {
+    $(id).addEventListener(id === "client-mcp-url" ? "input" : "change", renderClientSetup);
+  }
+  $("client-copy").addEventListener("click", async () => {
+    if (!key || !clientSetup.open || $("client-copy").disabled) return;
+    try {
+      await navigator.clipboard.writeText($("client-config").value);
+      $("client-setup-feedback").textContent = "已复制，请在客户端所在机器上添加。";
+    } catch {
+      $("client-config").focus(); $("client-config").select();
+      $("client-setup-feedback").textContent = "浏览器未允许自动复制，已选中内容，请按 Ctrl+C / Command+C 复制。";
+    }
+  });
+  const configDialog = $("broker-config");
+  const configFields = {
+    broker: [
+      ["mcp_host", "MCP 监听地址", "text"], ["mcp_port", "MCP 端口", "port"],
+      ["executor_host", "Executor 监听地址", "text"], ["executor_port", "Executor 端口", "port"],
+      ["output_mode", "终端输出", ["raw", "tui"]], ["max_log_bytes", "每个任务/服务保留日志字节数", "number"],
+      ["max_completed_tasks", "保留完成任务数", "number"], ["max_completed_services", "保留结束服务数", "number"],
+      ["max_pending_tasks", "每个 executor 未完成任务上限", "number"], ["key", "Broker Key（留空保持原值）", "password"],
+    ],
+    executor: [
+      ["broker_url", "连接中心的 WebSocket URL", "text"], ["broker_port", "覆盖连接端口（留空使用 URL 中的端口）", "optional-port"],
+      ["output_mode", "终端输出", ["raw", "prefixed", "tui"]], ["key", "Executor Key（留空保持原值）", "password"],
+    ],
+  };
+  let configRevision = null, configBusy = false, configRequest = 0;
+  for (const [section, fields] of Object.entries(configFields)) {
+    const group = element("section", "config-group");
+    group.append(element("h3", "", section === "broker" ? "中心 Broker" : "本机 Executor 默认设置"));
+    const grid = element("div", "config-grid");
+    for (const [name, label, type] of fields) {
+      const wrapper = element("div"), id = "config-" + section + "-" + name;
+      const title = element("label", "", label); title.htmlFor = id;
+      let input;
+      if (Array.isArray(type)) {
+        input = element("select");
+        for (const choice of type) {const option = element("option", "", choice); option.value = choice; input.append(option);}
+      } else {
+        input = element("input");
+        input.type = type.includes("port") || type === "number" ? "number" : type;
+        if (input.type === "number") {input.min = "1"; input.step = "1"; if (type.includes("port")) input.max = "65535";}
+        input.required = !["password", "optional-port"].includes(type);
+        input.autocomplete = type === "password" ? "new-password" : "off";
+        input.spellcheck = false;
+      }
+      input.id = id; input.name = section + "." + name;
+      wrapper.append(title, input); grid.append(wrapper);
+    }
+    group.append(grid); $("broker-config-inputs").append(group);
+  }
+  function clearConfigKeys() {
+    for (const section of Object.keys(configFields)) $("config-" + section + "-key").value = "";
+  }
+  function fillConfig(result) {
+    configRevision = result.revision;
+    $("broker-config-path").textContent = result.path + (result.environment_key_override ? " · BROKER_KEY 已覆盖文件凭据" : "");
+    for (const [section, fields] of Object.entries(configFields)) {
+      for (const [name] of fields) $("config-" + section + "-" + name).value = name === "key" ? "" : result.values[section][name] ?? "";
+      $("config-" + section + "-key").placeholder = result.key_configured[section] ? "已配置，留空不变" : "未单独配置，留空不变";
+    }
+  }
+  async function loadBrokerConfig() {
+    if (configBusy) {$("broker-config-feedback").textContent = "正在保存，请稍候…"; return;}
+    const request = ++configRequest;
+    configRevision = null; $("broker-config-fields").disabled = true;
+    clearConfigKeys(); $("broker-config-feedback").textContent = "正在读取配置文件…";
+    try {
+      const result = await api("config");
+      if (request !== configRequest || !configDialog.open) return;
+      fillConfig(result); $("broker-config-fields").disabled = false;
+      $("broker-config-feedback").textContent = "已读取文件中的配置；上次保存的设置可能尚未重启生效。";
+    } catch (error) {
+      if (request === configRequest && configDialog.open) $("broker-config-feedback").textContent = error.message;
+    }
+  }
+  $("broker-config-toggle").addEventListener("click", () => {configDialog.showModal(); loadBrokerConfig();});
+  $("broker-config-close").addEventListener("click", () => configDialog.close());
+  configDialog.addEventListener("keydown", trapDialogFocus);
+  configDialog.addEventListener("cancel", clearConfigKeys);
+  configDialog.addEventListener("close", () => {configRequest++; configRevision = null; clearConfigKeys(); $("broker-config-fields").disabled = true; $("broker-config-toggle").focus();});
+  $("broker-config-reload").addEventListener("click", () => {
+    if (window.confirm("重新读取配置文件并放弃未保存的修改？")) loadBrokerConfig();
+  });
+  $("broker-config-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (configBusy || !configRevision || !key) return;
+    const values = {};
+    for (const [section, fields] of Object.entries(configFields)) {
+      values[section] = {};
+      for (const [name, , type] of fields) {
+        const value = $("config-" + section + "-" + name).value;
+        if (name === "key" && !value) continue;
+        values[section][name] = ["number", "port", "optional-port"].includes(type) ? (value === "" ? null : Number(value)) : value;
+      }
+    }
+    const request = configRequest;
+    configBusy = true; $("broker-config-fields").disabled = true; $("broker-config-reload").disabled = true;
+    $("broker-config-feedback").textContent = "正在保存…";
+    try {
+      const result = await api("config", "POST", {revision: configRevision, values});
+      if (request !== configRequest || !configDialog.open) return;
+      fillConfig(result);
+      $("broker-config-feedback").textContent = "已保存到文件。重启 Broker / 使用此文件的本机 executor 后生效；命令行参数和 BROKER_KEY 环境变量仍优先。";
+    } catch (error) {
+      if (request === configRequest && configDialog.open) {
+        $("broker-config-feedback").textContent = error.message;
+        $("broker-config-feedback").focus();
+      }
+    } finally {
+      configBusy = false; $("broker-config-fields").disabled = !configRevision; $("broker-config-reload").disabled = false;
+      if (request !== configRequest && configDialog.open && key) loadBrokerConfig();
+    }
+  });
   function notificationText(notification) {
     const labels = {pending: "等待服务结束", queued: "已排队，等待发送", waiting_idle: "等待 Agent 空闲",
       sending: "正在发送", submitted: "发送已提交，请在目标 Agent 会话确认收到", failed: "发送失败",
@@ -228,6 +410,11 @@
   function disconnect() {
     rememberKey("");
     generation++; key = ""; snapshot = null; selected = null;
+    if (clientSetup.open) clientSetup.close();
+    clearClientSecret(); $("client-setup-toggle").hidden = true;
+    configRequest++; configRevision = null;
+    if (configDialog.open) configDialog.close();
+    clearConfigKeys(); $("broker-config-toggle").hidden = true;
     paseoEditing = null; fillPaseo(null); $("paseo-panel").hidden = true;
     savedViews = {};
     serviceStates.clear(); unreadServices.clear(); serviceBaseline = false;
@@ -533,6 +720,8 @@
       message("");
       $("dashboard").hidden = false; $("login").hidden = true;
       $("notifications-toggle").hidden = false;
+      $("client-setup-toggle").hidden = false;
+      $("broker-config-toggle").hidden = false;
       updateConnection();
       await Promise.all([...cards.values()].filter(card => !card.node.hidden).map(loadLogs));
     } catch (error) {

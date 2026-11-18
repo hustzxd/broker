@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.53
+# broker v0.1.55
 ```
 
 ## Start the broker
@@ -54,6 +54,8 @@ after confirmation; online or active records are protected. Server-side rendered
 logs use a bounded cache. No server log files are created.
 
 Use the header theme switch for dark/light mode; the browser remembers this preference independently of login. The **GitHub** link in the header opens the Broker repository in a new tab and is available before and after login.
+
+After login, **配置** (Configuration) edits the broker's selected `config.yaml`: broker listeners, ports, output mode, log/history/queue limits, and the local executor's URL, optional port override and output mode. Stored keys are not returned to the browser; leave password fields blank to preserve them, or enter replacements. Saving validates values and atomically updates the file with mode `600`, preserving Paseo bindings and unrelated fields. If the file has changed since loading, reload it before saving. YAML formatting and comments are not preserved. Changes apply after restarting the corresponding broker or local executor; CLI options and `BROKER_KEY` still override the file. Update client/executor credentials when changing keys. This does not edit remote executors' files or restart any process. Paseo bindings continue to apply immediately through their own panel. Embedded brokers need `config_path` to enable editing.
 
 Service completion/failure produces in-page reminders and unread counts in the
 header, executor sidebar and Services tab. Click a reminder to open its service;
@@ -120,6 +122,8 @@ Or override the address with `--broker-url ws://broker-host:8272`. Key lookup or
 Both broker and executor default to raw logs. Use the Web UI for the dashboard, or select `--output-mode tui` explicitly for a terminal dashboard. Executors also support `--output-mode prefixed`. Existing YAML settings remain effective; change `output_mode: tui` to `raw` to update an older configuration. CLI options override YAML; place `--config /path/to/config.yaml` before the `executor` subcommand.
 
 ## Connect Codex
+
+After logging into the Web UI, open **接入客户端** (Connect client) in the header to generate and copy a Codex configuration or Claude Code command. The MCP URL defaults to the current site's `/mcp` endpoint and can be edited for a proxy or tunnel. The browser generates snippets; apply them on the machine running the client. By default they use `BROKER_KEY`; explicitly including the login key is available for private configurations. Closing the dialog or an authentication failure clears that choice and removes the key from the preview. Claude Code project scope always writes a literal `${BROKER_KEY}` reference to `.mcp.json` through `add-json`, keeping the real key out of shared configuration. Copying falls back to selecting the text when clipboard access is unavailable.
 
 Add this to `~/.codex/config.toml`, using the central broker's key:
 

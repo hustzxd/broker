@@ -9,7 +9,29 @@
   <script src="/ui/app.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="/ui/">B<span>Broker</span></a><span id="connection" role="status">等待连接</span><span id="last-update"></span><div class="header-actions"><a class="github-link" href="https://github.com/hustzxd/broker" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库（新标签页打开）">GitHub</a><button id="notifications-toggle" hidden aria-expanded="false" aria-controls="notifications">服务提醒 <span id="unread-total">0</span></button><button id="theme-toggle" aria-label="切换到浅色主题" aria-pressed="false">浅色主题</button></div></header>
+  <header><a class="brand" href="/ui/">B<span>Broker</span></a><span id="connection" role="status">等待连接</span><span id="last-update"></span><div class="header-actions"><a class="github-link" href="https://github.com/hustzxd/broker" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库（新标签页打开）">GitHub</a><button id="broker-config-toggle" hidden aria-haspopup="dialog">配置</button><button id="client-setup-toggle" hidden aria-haspopup="dialog">接入客户端</button><button id="notifications-toggle" hidden aria-expanded="false" aria-controls="notifications">服务提醒 <span id="unread-total">0</span></button><button id="theme-toggle" aria-label="切换到浅色主题" aria-pressed="false">浅色主题</button></div></header>
+  <dialog id="broker-config" aria-labelledby="broker-config-title">
+    <div class="client-setup-heading"><h2 id="broker-config-title">Broker 配置</h2><button id="broker-config-close" aria-label="关闭 Broker 配置">关闭</button></div>
+    <p id="broker-config-path"></p>
+    <p>编辑当前 Broker 使用的配置文件。保存后，Broker 设置需重启 Broker 生效；executor 设置只影响使用此文件的本机 executor，需重启该 executor。命令行参数及 BROKER_KEY 环境变量优先于文件。</p>
+    <p>修改 Key 后，请同步更新客户端和 executor 凭据；当前连接使用原 Key，直到 Broker 重启。Paseo 通知绑定仍在 executor 的「Paseo 通知」面板即时管理。</p>
+    <p id="broker-config-feedback" role="status" aria-live="polite" tabindex="-1"></p>
+    <form id="broker-config-form"><fieldset id="broker-config-fields" disabled><div id="broker-config-inputs"></div><div class="client-setup-actions"><button id="broker-config-save" class="primary" type="submit">保存到配置文件</button></div></fieldset></form>
+    <button id="broker-config-reload" type="button">重新加载文件（放弃未保存修改）</button>
+  </dialog>
+  <dialog id="client-setup" aria-labelledby="client-setup-title">
+    <div class="client-setup-heading"><h2 id="client-setup-title">接入 MCP 客户端</h2><button id="client-setup-close" aria-label="关闭接入客户端">关闭</button></div>
+    <p>生成此 Broker 的连接配置，在运行客户端的机器上添加。请先安装相应客户端，并确保该机器能访问以下地址。</p>
+    <label for="client-mcp-url">MCP 地址</label><input id="client-mcp-url" type="url" spellcheck="false" autocomplete="off" aria-describedby="client-url-help client-setup-feedback">
+    <p id="client-url-help">默认使用当前站点的 /mcp；使用代理或隧道时，请填写客户端实际能访问的完整地址。远程访问请使用 HTTPS 或加密隧道。</p>
+    <div class="client-setup-fields"><div><label for="client-kind">客户端</label><select id="client-kind"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></div><div id="client-scope-field" hidden><label for="client-scope">配置范围</label><select id="client-scope"><option value="user">user · 当前用户的所有项目</option><option value="project">project · 项目共享 .mcp.json</option><option value="local">local · 当前用户当前项目（CLI 默认）</option></select></div></div>
+    <label class="client-key-option"><input id="client-include-key" type="checkbox">在生成内容中包含当前登录 Key</label>
+    <p id="client-key-help">默认引用 BROKER_KEY，请在启动客户端或执行添加命令前安全设置该环境变量。包含 Key 的内容仅用于私有配置，请勿提交到共享仓库。</p>
+    <p id="client-instructions"></p>
+    <label for="client-config">配置 / 命令（Shell 命令适用于 Bash、Zsh）</label><textarea id="client-config" readonly spellcheck="false" rows="6"></textarea>
+    <div class="client-setup-actions"><button id="client-copy" class="primary">复制配置 / 命令</button></div>
+    <p id="client-verify"></p><p id="client-setup-feedback" role="status" aria-live="polite"></p>
+  </dialog>
   <section id="notifications" hidden aria-label="服务提醒"><div class="notification-heading"><strong>服务提醒</strong><button id="read-all">全部已读</button><button id="notifications-close" aria-label="关闭服务提醒">关闭</button></div><p id="notification-empty">暂无未读服务提醒</p><div id="notification-list"></div></section>
   <button id="service-announcement" aria-live="polite" hidden></button>
   <section id="login" class="login">

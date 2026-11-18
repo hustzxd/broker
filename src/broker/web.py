@@ -3,6 +3,7 @@
 from pathlib import Path
 from collections import OrderedDict
 import json
+import yaml
 
 from mcp.server.mcpserver.exceptions import ToolError
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse
@@ -11,6 +12,7 @@ from websockets.exceptions import ConnectionClosed
 
 from .terminal_output import render_output
 from .version import __version__
+from .config import ConfigConflictError, save_web_config, web_config_snapshot
 
 
 ASSETS = Path(__file__).with_name("web_assets")
@@ -26,6 +28,34 @@ def web_routes(broker):
     rendered_logs = OrderedDict()
     cache_bytes = 0
     max_cache_bytes = 8 * 1024 * 1024
+
+    async def configuration(request):
+        if broker.config_path is None:
+            return JSONResponse({"error": "This broker has no configuration file; start it with the broker CLI or supply config_path"}, status_code=400, headers=HEADERS)
+        if request.method == "POST" and cross_origin(request):
+            return JSONResponse({"error": "Cross-origin controls are not allowed"}, status_code=403, headers=HEADERS)
+        try:
+            if request.method == "GET":
+                result = web_config_snapshot(broker.config_path)
+            else:
+                body = bytearray()
+                async for chunk in request.stream():
+                    body.extend(chunk)
+                    if len(body) > 16384:
+                        return JSONResponse({"error": "Request too large"}, status_code=413, headers=HEADERS)
+                data = json.loads(body)
+                if not isinstance(data, dict) or set(data) != {"values", "revision"}:
+                    raise ValueError("Expected values and revision")
+                result = save_web_config(broker.config_path, data["values"], data["revision"])
+            return JSONResponse(result, headers=HEADERS)
+        except ConfigConflictError as error:
+            return JSONResponse({"error": str(error)}, status_code=409, headers=HEADERS)
+        except (yaml.YAMLError, UnicodeError):
+            return JSONResponse({"error": "Configuration file is not valid UTF-8 YAML"}, status_code=400, headers=HEADERS)
+        except ValueError as error:
+            return JSONResponse({"error": str(error)}, status_code=400, headers=HEADERS)
+        except OSError:
+            return JSONResponse({"error": "Could not read or save the broker configuration file"}, status_code=503, headers=HEADERS)
 
     def cross_origin(request):
         origin = request.headers.get("origin")
@@ -168,6 +198,7 @@ def web_routes(broker):
         Route("/ui/app.js", asset), Route("/ui/style.css", asset),
         Route("/ui/favicon.svg", asset),
         Route("/ui/api/state", state),
+        Route("/ui/api/config", configuration, methods=["GET", "POST"]),
         Route("/ui/api/executor-paseo", executor_paseo, methods=["POST"]),
         Route("/ui/api/executor-paseo/test", executor_paseo, methods=["POST"]),
         Route("/ui/api/history/clear", clear_history, methods=["POST"]),

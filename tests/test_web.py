@@ -13,6 +13,73 @@ from broker.terminal_output import render_output
 
 
 class WebTests(unittest.IsolatedAsyncioTestCase):
+    async def test_configuration_read_save_and_conflict(self):
+        path = "/ui/api/config"
+        self.assertEqual((await self.client.get(path)).status_code, 401)
+        loaded = await self.client.get(path, headers=self.headers)
+        self.assertEqual(loaded.status_code, 200)
+        saved = loaded.json()
+        self.assertNotIn("web-secret", loaded.text)
+        self.assertEqual(saved["values"]["broker"]["mcp_port"], 8273)
+        self.assertTrue(saved["key_configured"]["broker"])
+        payload = {"revision": saved["revision"], "values": {
+            "broker": {"mcp_port": 9123, "max_log_bytes": 4096},
+            "executor": {"broker_url": "wss://broker.example.com/socket", "broker_port": 9000},
+        }}
+        self.assertEqual((await self.client.post(path, json=payload)).status_code, 401)
+        self.assertEqual((await self.client.post(path, headers={**self.headers, "Origin": "https://other.example"}, json=payload)).status_code, 403)
+        result = await self.client.post(path, headers=self.headers, json=payload)
+        self.assertEqual(result.status_code, 200)
+        config = yaml.safe_load(self.config_path.read_text())
+        self.assertEqual(config["broker"]["key"], "web-secret")
+        self.assertEqual(config["broker"]["mcp_port"], 9123)
+        self.assertEqual(config["executor"]["output_mode"], "raw")
+        self.assertEqual(self.broker.max_log_bytes, 1048576)  # saved, not live-applied
+        self.assertEqual(self.config_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual((await self.client.post(path, headers=self.headers, json=payload)).status_code, 409)
+        payload["revision"] = result.json()["revision"]
+        self.broker.set_executor_paseo("demo", {"paseo_agent_id": "test-agent"})
+        self.assertEqual((await self.client.post(path, headers=self.headers, json=payload)).status_code, 409)
+        payload["revision"] = (await self.client.get(path, headers=self.headers)).json()["revision"]
+        payload["values"] = {"executor": {"broker_port": None, "key": "new-executor-key"}, "broker": {"key": "new-broker-key"}}
+        result = await self.client.post(path, headers=self.headers, json=payload)
+        self.assertEqual(result.status_code, 200)
+        self.assertNotIn("new-broker-key", result.text)
+        self.assertNotIn("new-executor-key", result.text)
+        config = yaml.safe_load(self.config_path.read_text())
+        self.assertEqual(config["broker"]["key"], "new-broker-key")
+        self.assertIn("demo", config["broker"]["executor_paseo"])
+        self.assertNotIn("broker_port", config["executor"])
+        self.assertEqual((await self.client.get(path, headers=self.headers)).status_code, 200)
+
+    async def test_configuration_rejects_invalid_values_without_writes(self):
+        path = "/ui/api/config"
+        original = self.config_path.read_bytes()
+        revision = (await self.client.get(path, headers=self.headers)).json()["revision"]
+        invalid = [
+            {"broker": {"mcp_port": True}}, {"broker": {"mcp_port": 65536}},
+            {"broker": {"mcp_host": "http://localhost"}}, {"broker": {"output_mode": "prefixed"}},
+            {"broker": {"key": "white space"}}, {"broker": {"max_pending_tasks": 0}},
+            {"executor": {"broker_url": "http://example.com"}},
+            {"executor": {"broker_url": "ws://user:secret@example.com"}},
+            {"broker": {"executor_paseo": {}}}, {"unrecognized": {}},
+        ]
+        for values in invalid:
+            with self.subTest(values=values):
+                result = await self.client.post(path, headers=self.headers, json={"revision": revision, "values": values})
+                self.assertEqual(result.status_code, 400)
+                self.assertEqual(self.config_path.read_bytes(), original)
+        self.assertEqual((await self.client.post(path, headers=self.headers, content="bad json")).status_code, 400)
+        self.assertEqual((await self.client.post(path, headers=self.headers, content="x" * 16385)).status_code, 413)
+        with patch("broker.config.os.replace", side_effect=OSError("sensitive detail")):
+            result = await self.client.post(path, headers=self.headers, json={"revision": revision, "values": {"broker": {"mcp_port": 9000}}})
+        self.assertEqual(result.status_code, 503)
+        self.assertNotIn("sensitive detail", result.text)
+        self.assertEqual(self.config_path.read_bytes(), original)
+        self.assertEqual(list(Path(self.directory.name).iterdir()), [self.config_path])
+        self.broker.config_path = None
+        self.assertEqual((await self.client.get(path, headers=self.headers)).status_code, 400)
+
     async def test_start_service_schema_has_no_paseo_argument(self):
         tools = await self.server.list_tools()
         tool = next(tool for tool in tools if tool.name == "start_service")
