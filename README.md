@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.55
+# broker v0.1.56
 ```
 
 ## Start the broker
@@ -54,6 +54,8 @@ after confirmation; online or active records are protected. Server-side rendered
 logs use a bounded cache. No server log files are created.
 
 Use the header theme switch for dark/light mode; the browser remembers this preference independently of login. The **GitHub** link in the header opens the Broker repository in a new tab and is available before and after login.
+
+Click outside **配置** (Configuration), **接入客户端** (Connect client), or **服务提醒** (Service notifications) to close the open panel. Clicking inside keeps it open; the close buttons and Escape remain available. Closing Configuration does not save edits.
 
 After login, **配置** (Configuration) edits the broker's selected `config.yaml`: broker listeners, ports, output mode, log/history/queue limits, and the local executor's URL, optional port override and output mode. Stored keys are not returned to the browser; leave password fields blank to preserve them, or enter replacements. Saving validates values and atomically updates the file with mode `600`, preserving Paseo bindings and unrelated fields. If the file has changed since loading, reload it before saving. YAML formatting and comments are not preserved. Changes apply after restarting the corresponding broker or local executor; CLI options and `BROKER_KEY` still override the file. Update client/executor credentials when changing keys. This does not edit remote executors' files or restart any process. Paseo bindings continue to apply immediately through their own panel. Embedded brokers need `config_path` to enable editing.
 

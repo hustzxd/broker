@@ -108,6 +108,24 @@
     }
   });
   const configDialog = $("broker-config");
+  for (const dialog of [clientSetup, configDialog]) {
+    let pressedOutside = false;
+    const outside = event => {
+      const bounds = dialog.getBoundingClientRect();
+      return event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom);
+    };
+    dialog.addEventListener("pointerdown", event => { pressedOutside = outside(event); });
+    dialog.addEventListener("pointercancel", () => { pressedOutside = false; });
+    dialog.addEventListener("click", event => {
+      if (pressedOutside && outside(event)) {
+        if (dialog === clientSetup) clearClientSecret();
+        else clearConfigKeys();
+        dialog.close();
+      }
+      pressedOutside = false;
+    });
+  }
   const configFields = {
     broker: [
       ["mcp_host", "MCP 监听地址", "text"], ["mcp_port", "MCP 端口", "port"],
@@ -748,6 +766,12 @@
     if (restoreFocus) $("paseo-toggle").focus();
   }
   document.addEventListener("click", event => {
+    if (!$("notifications").hidden && !$("notifications").contains(event.target) &&
+        !$("notifications-toggle").contains(event.target) && !$("service-announcement").contains(event.target)) {
+      const restoreFocus = $("notifications").contains(document.activeElement);
+      setNotificationsOpen(false);
+      if (restoreFocus) $("notifications-toggle").focus();
+    }
     if (!$("paseo-panel").hidden && !$("paseo-panel").contains(event.target) &&
         !$("paseo-toggle").contains(event.target)) closePaseo();
   });
