@@ -366,6 +366,7 @@ async function paseoBindings() {
     assert.equal(env.state.executor_paseo.a, undefined);
     assert.equal(get("paseo-test").disabled, true);
     assert.match(get("paseo-feedback").textContent, /已解除绑定/);
+    assert.equal(get("paseo-test-status").textContent, "");
     assert.equal(get("executors").querySelector(".paseo-bound"), null);
   } finally {w.close();}
 }

@@ -46,7 +46,7 @@
       <div class="workspace-heading"><h1 id="executor-title">选择执行器</h1><div class="workspace-actions"><button id="paseo-toggle" aria-expanded="false" aria-controls="paseo-panel" hidden>Paseo 通知</button><button id="clear-history" hidden>清除离线历史</button></div></div>
       <section id="paseo-panel" class="paseo-panel" hidden aria-label="Paseo 通知设置">
         <h2>默认完成通知 · <span id="paseo-executor"></span></h2>
-        <p>只影响之后新建的服务。共享此 executor 的服务通知同一个 Agent；start_service 自动使用此绑定，无需传入通知参数。</p>
+        <p>绑定用于之后新建的服务。解除绑定会取消该 executor 未发送的通知；正在发送或已提交的消息可能仍会送达。</p>
         <p id="paseo-current"></p>
         <form id="paseo-form">
           <div class="paseo-fields">

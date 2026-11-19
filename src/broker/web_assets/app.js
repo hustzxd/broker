@@ -248,7 +248,7 @@
     $("paseo-executor").textContent = selected || "";
     $("paseo-current").textContent = target ? "当前接收者：" + target.paseo_agent_id : "未绑定：服务使用原有轮询方式。";
     const test = snapshot?.paseo_tests?.[selected];
-    $("paseo-test-status").textContent = test ? "最近测试：" + notificationText(test) : "";
+    $("paseo-test-status").textContent = target && test ? "最近测试：" + notificationText(test) : "";
     for (const name of ["agent", "save"]) $("paseo-" + name).disabled = paseoBusy;
     $("paseo-test").disabled = paseoBusy || !target || ["queued", "waiting_idle", "sending"].includes(test?.status);
     $("paseo-remove").disabled = paseoBusy || !target;
@@ -279,7 +279,7 @@
       if (selected === executor) {
         if (action !== "test") fillPaseo(result.paseo);
         $("paseo-feedback").textContent = action === "test" ? "测试消息已排队，等待 Agent 空闲后发送。" :
-          action === "remove" ? "已解除绑定，后续服务使用轮询。" : "绑定已保存，后续新服务将自动通知此 Agent。";
+          action === "remove" ? "已解除绑定，未发送通知已取消；正在发送或已提交的消息可能仍会送达。服务可通过轮询查询。" : "绑定已保存，后续新服务将自动通知此 Agent。";
       }
     } catch (error) {
       if (current === generation && selected === executor) $("paseo-feedback").textContent = error.message;

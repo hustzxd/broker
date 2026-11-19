@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # Local development:
 python -m pip install -e .
 broker --version
-# broker v0.1.56
+# broker v0.1.57
 ```
 
 ## Start the broker
@@ -71,15 +71,17 @@ Select an executor and open **Paseo 通知** to save its default completion-noti
 target using only the Agent ID. Web bindings use the central Broker's default Paseo. The binding is stored in
 `broker.executor_paseo` in the broker's selected YAML configuration and survives
 restarts. New `start_service` calls automatically inherit this target; there is
-no per-call `paseo` parameter. Existing services keep
-their original binding. Unbound executors retain the polling flow. A shared
+no per-call `paseo` parameter. Changing a binding affects new services; removing
+it cancels unsent notifications for existing services and tests on that executor.
+Unbound executors retain the polling flow. A shared
 executor notifies the same default Agent regardless of which client starts the
 service. The start response includes the resolved target when notifications are enabled.
 
 Bound executors show **已绑定** in the sidebar; hover over the badge to see the
 Agent ID. Use **发送测试消息** to submit a test to the saved target, then confirm
 receipt in that Agent's conversation; submission alone is not proof of delivery. **解除绑定**
-removes the default for future services. Bindings can also be edited while an
+removes the default and cancels unsent notifications. Messages already sending
+or submitted to Paseo may still be delivered and cannot be recalled. Bindings can also be edited while an
 executor is offline. Embedders using `create_broker` must supply `config_path`
 and the loaded `executor_paseo` mapping to enable persistent web editing.
 Click outside the Paseo settings panel or press Escape to close it; unsaved input

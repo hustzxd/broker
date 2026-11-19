@@ -17,7 +17,7 @@ python -m pip install --upgrade git+https://github.com/hustzxd/broker.git
 # 本地开发：
 python -m pip install -e .
 broker --version
-# broker v0.1.56
+# broker v0.1.57
 ```
 
 ## 启动中心 Broker
@@ -47,9 +47,9 @@ Web 页面会在标签页会话中保留 executor/分类选择、卡片展开、
 
 Service 结束或失败时提供页面内提醒，顶部、executor 侧栏和 Services 页签显示未读数。点击提醒可定位并展开服务，主动展开详情标为已读，也可点击“标为已读”或“全部已读”；刷新/切换视图时自动恢复展开状态不会清除未读。首次加载不提醒已有历史；未读状态在当前标签页会话中保存，刷新不重复弹提醒，后台标签页返回后同步。Task 不提醒，不申请桌面通知权限或播放声音。
 
-选中 executor 后，点击 **Paseo 通知**，只需填写默认接收者的 Agent ID，使用中心 Broker 的默认 Paseo。绑定保存在中心 Broker 所选 YAML 配置的 `broker.executor_paseo` 中，重启后仍有效。新建服务自动使用 executor 绑定的目标，`start_service` 不再提供 `paseo` 参数。已启动服务保留原绑定，没有绑定时仍采用轮询。同一 executor 的所有调用者默认通知同一个 Agent；启用通知时，`start_service` 返回实际采用的目标。
+选中 executor 后，点击 **Paseo 通知**，只需填写默认接收者的 Agent ID，使用中心 Broker 的默认 Paseo。绑定保存在中心 Broker 所选 YAML 配置的 `broker.executor_paseo` 中，重启后仍有效。新建服务自动使用 executor 绑定的目标，`start_service` 不再提供 `paseo` 参数。修改绑定只影响新服务；解除绑定会取消该 executor 现有服务和测试消息中尚未发送的通知，没有绑定时采用轮询。同一 executor 的所有调用者默认通知同一个 Agent；启用通知时，`start_service` 返回实际采用的目标。
 
-**发送测试消息** 使用已保存的目标，请在目标 Agent 对话中确认收到，提交成功不等于实际送达。**解除绑定** 只影响后续新服务。Executor 离线时也可修改已有绑定。以 `create_broker` 嵌入运行时，需要传入 `config_path` 和已加载的 `executor_paseo` 才能持久保存网页配置。
+**发送测试消息** 使用已保存的目标，请在目标 Agent 对话中确认收到，提交成功不等于实际送达。解除绑定后，正在发送或已提交给 Paseo 的消息仍可能送达，无法撤回。Executor 离线时也可修改已有绑定。以 `create_broker` 嵌入运行时，需要传入 `config_path` 和已加载的 `executor_paseo` 才能持久保存网页配置。
 
 左侧 executor 列表中，已配置通知目标的条目显示 **已绑定**，悬停标签可查看 Agent ID；保存或解除绑定后自动更新。
 点击 Paseo 设置面板外部或按 Esc 可关闭面板；保持选中同一 executor 时，未保存的输入会保留。

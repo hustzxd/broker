@@ -1,5 +1,8 @@
 import asyncio
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from broker.broker import ExecutionBroker
@@ -7,6 +10,82 @@ from broker.paseo import send_completion, wait_until_idle
 
 
 class PaseoTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unbinding_cancels_only_own_unsent_notifications(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.yaml"
+            config.write_text("broker: {}\n", encoding="utf-8")
+            gate = asyncio.Event()
+            waiting = asyncio.Event()
+            sent = []
+
+            async def waiter(target):
+                waiting.set()
+                await gate.wait()
+
+            async def sender(target, prompt):
+                sent.append(prompt)
+                return {"status": "sent"}
+
+            broker = ExecutionBroker(config_path=str(config), paseo_waiter=waiter, paseo_sender=sender)
+            target = {"paseo_agent_id": "shared"}
+            broker.set_executor_paseo("first", target)
+            broker.set_executor_paseo("second", target)
+            socket = SimpleNamespace(send=AsyncMock(), close=AsyncMock())
+            broker.executors = {name: {"websocket": socket} for name in ("first", "second")}
+            service = await broker.start_service("first", "running", "serve")
+            pending = broker.services[service["service_id"]]["notification"]
+            broker.enqueue_paseo_test("first")
+            await asyncio.wait_for(waiting.wait(), timeout=2)
+            first_test = broker.paseo_tests["first"]
+            finished = await broker.start_service("first", "finished", "serve")
+            finished_record = broker.services[finished["service_id"]]
+            finished_record.update(status="stopped", finished_at=1)
+            broker._schedule_service_notification(finished_record)
+            broker.services.pop(finished["service_id"])
+            broker.enqueue_paseo_test("second")
+            second_test = broker.paseo_tests["second"]
+            self.assertEqual(first_test["status"], "waiting_idle")
+            self.assertEqual(finished_record["notification"]["status"], "queued")
+            self.assertEqual(second_test["status"], "queued")
+            broker.set_executor_paseo("first", None)
+            self.assertEqual(first_test["status"], "cancelled")
+            self.assertEqual(pending["status"], "cancelled")
+            self.assertEqual(finished_record["notification"]["status"], "cancelled")
+            broker._schedule_service_notification(broker.services[service["service_id"]])
+            await asyncio.sleep(0)
+            self.assertFalse(sent)
+            gate.set()
+            await asyncio.gather(*list(broker._notification_tasks))
+            self.assertEqual(second_test["status"], "submitted")
+            self.assertEqual(len(sent), 1)
+            self.assertIn("executor=second", sent[0])
+            broker.set_executor_paseo("first", target)
+            self.assertEqual(pending["status"], "cancelled")
+            await broker.shutdown()
+
+    async def test_unbinding_preserves_already_sending_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.yaml"
+            config.write_text("broker: {}\n", encoding="utf-8")
+            sending = asyncio.Event()
+            finish = asyncio.Event()
+
+            async def sender(target, prompt):
+                sending.set()
+                await finish.wait()
+                return {"status": "sent"}
+
+            broker = ExecutionBroker(config_path=str(config), paseo_waiter=AsyncMock(), paseo_sender=sender)
+            broker.set_executor_paseo("first", {"paseo_agent_id": "agent"})
+            broker.enqueue_paseo_test("first")
+            await asyncio.wait_for(sending.wait(), timeout=2)
+            broker.set_executor_paseo("first", None)
+            self.assertEqual(broker.paseo_tests["first"]["status"], "sending")
+            finish.set()
+            await asyncio.gather(*list(broker._notification_tasks))
+            self.assertEqual(broker.paseo_tests["first"]["status"], "submitted")
+            await broker.shutdown()
+
     async def test_wait_retries_busy_and_permission_without_sending(self):
         with patch("broker.paseo._run_cli", new_callable=AsyncMock) as run, patch(
             "broker.paseo.asyncio.sleep", new_callable=AsyncMock,
@@ -51,9 +130,9 @@ class PaseoTests(unittest.IsolatedAsyncioTestCase):
 
         broker = ExecutionBroker(paseo_waiter=waiter, paseo_sender=sender)
         first, second, other = {}, {}, {}
-        broker._enqueue_notification({"paseo_agent_id": "busy"}, "first", first)
-        broker._enqueue_notification({"paseo_agent_id": "busy"}, "second", second)
-        broker._enqueue_notification({"paseo_agent_id": "idle"}, "other", other)
+        broker._enqueue_notification("first", {"paseo_agent_id": "busy"}, "first", first)
+        broker._enqueue_notification("second", {"paseo_agent_id": "busy"}, "second", second)
+        broker._enqueue_notification("other", {"paseo_agent_id": "idle"}, "other", other)
         await waiting.wait()
         for _ in range(5):
             await asyncio.sleep(0)
@@ -66,7 +145,7 @@ class PaseoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["status"], "submitted")
         gate.clear()
         pending = {}
-        broker._enqueue_notification({"paseo_agent_id": "busy"}, "cancel", pending)
+        broker._enqueue_notification("first", {"paseo_agent_id": "busy"}, "cancel", pending)
         await asyncio.sleep(0)
         await broker.shutdown()
         self.assertEqual(pending["status"], "cancelled")

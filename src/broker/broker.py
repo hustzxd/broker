@@ -1,5 +1,6 @@
 """MCP-facing execution broker."""
 
+from collections import deque
 from contextlib import asynccontextmanager
 import asyncio
 import json
@@ -50,6 +51,7 @@ class ExecutionBroker:
         self._paseo_executable = paseo_executable
         self._notification_tasks = set()
         self._notification_queues = {}
+        self._notification_waiters = {}
         self._paseo_waiter = paseo_waiter
         self._closing = False
         self.paseo_tests = {}
@@ -80,7 +82,28 @@ class ExecutionBroker:
             bindings[executor_id] = binding
         save_executor_paseo(self.config_path, bindings)
         self.executor_paseo = bindings
+        if binding is None:
+            self._cancel_executor_notifications(executor_id)
         return binding
+
+    def _cancel_executor_notifications(self, executor_id):
+        cancelled = {"status": "cancelled", "error": "Paseo binding removed"}
+        for service in self.services.values():
+            notification = service.get("notification")
+            if service["executor_id"] == executor_id and notification and notification["status"] == "pending":
+                notification.update(cancelled)
+        for queue in self._notification_queues.values():
+            for _ in range(len(queue)):
+                entry = queue.popleft()
+                owner, _, _, notification = entry
+                if owner == executor_id:
+                    notification.update(cancelled)
+                else:
+                    queue.append(entry)
+        for owner, notification, waiter in self._notification_waiters.values():
+            if owner == executor_id:
+                notification.update(cancelled)
+                waiter.cancel()
 
     async def shutdown(self):
         self._closing = True
@@ -90,8 +113,8 @@ class ExecutionBroker:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
         for queue in self._notification_queues.values():
-            while not queue.empty():
-                _, _, pending = queue.get_nowait()
+            while queue:
+                _, _, _, pending = queue.popleft()
                 pending.update(status="cancelled", error="Broker is shutting down")
         self._notification_queues.clear()
         connections = [executor["websocket"] for executor in self.executors.values()]
@@ -237,7 +260,8 @@ class ExecutionBroker:
         notification = service.get("notification")
         if not service.get("paseo") or not notification or notification["status"] != "pending":
             return
-        self._enqueue_notification(service["paseo"], completion_prompt(service, notification["event_id"]), notification)
+        self._enqueue_notification(service["executor_id"], service["paseo"],
+                                   completion_prompt(service, notification["event_id"]), notification)
 
     def enqueue_paseo_test(self, executor_id):
         target = self.executor_paseo.get(executor_id)
@@ -247,37 +271,49 @@ class ExecutionBroker:
         if previous and previous["status"] in {"queued", "waiting_idle", "sending"}:
             return dict(previous)
         notification = {"status": "pending"}
-        self._enqueue_notification(target, f"Broker Paseo test: executor={executor_id}. This is a test of the saved notification binding.", notification)
+        self._enqueue_notification(executor_id, target,
+                                   f"Broker Paseo test: executor={executor_id}. This is a test of the saved notification binding.",
+                                   notification)
         self.paseo_tests[executor_id] = notification
         return dict(notification)
 
-    def _enqueue_notification(self, target, prompt, notification):
+    def _enqueue_notification(self, executor_id, target, prompt, notification):
         if self._closing:
             notification.update(status="cancelled", error="Broker is shutting down")
             return
-        if sum(queue.qsize() + 1 for queue in self._notification_queues.values()) >= 256:
+        if sum(len(queue) + 1 for queue in self._notification_queues.values()) >= 256:
             notification.update(status="failed", error="Paseo notification queue is full")
             return
         key = (target.get("paseo_host"), target["paseo_agent_id"])
         queue = self._notification_queues.get(key)
         if queue is None:
-            queue = self._notification_queues[key] = asyncio.Queue()
+            queue = self._notification_queues[key] = deque()
             task = asyncio.create_task(self._notification_worker(key, queue))
             self._notification_tasks.add(task)
             task.add_done_callback(self._notification_tasks.discard)
         notification["status"] = "queued"
-        queue.put_nowait((dict(target), prompt, notification))
+        queue.append((executor_id, dict(target), prompt, notification))
 
     async def _notification_worker(self, key, queue):
         try:
-            while not queue.empty():
-                target, prompt, notification = queue.get_nowait()
+            while queue:
+                executor_id, target, prompt, notification = queue.popleft()
                 try:
                     notification["status"] = "waiting_idle"
-                    if self._paseo_waiter is None:
-                        await wait_until_idle(target, executable=self._paseo_executable)
-                    else:
-                        await self._paseo_waiter(target)
+                    wait = (wait_until_idle(target, executable=self._paseo_executable)
+                            if self._paseo_waiter is None else self._paseo_waiter(target))
+                    waiter = asyncio.create_task(wait)
+                    self._notification_waiters[key] = (executor_id, notification, waiter)
+                    try:
+                        await waiter
+                    except asyncio.CancelledError:
+                        if notification["status"] == "cancelled" and not self._closing:
+                            continue
+                        raise
+                    finally:
+                        self._notification_waiters.pop(key, None)
+                    if notification["status"] == "cancelled":
+                        continue
                     notification["status"] = "sending"
                     if self._paseo_sender is None:
                         receipt = await send_completion(target, prompt, executable=self._paseo_executable)
@@ -294,8 +330,8 @@ class ExecutionBroker:
                     notification.update(status=status, error=str(exc))
                     logger.warning("Paseo notification failed: agent=%s error=%s", key[1], exc)
         finally:
-            while not queue.empty():
-                _, _, pending = queue.get_nowait()
+            while queue:
+                _, _, _, pending = queue.popleft()
                 pending.update(status="cancelled", error="Broker is shutting down")
             self._notification_queues.pop(key, None)
 
